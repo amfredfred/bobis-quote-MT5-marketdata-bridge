@@ -9,13 +9,13 @@ from configs import Config
 
 app = FastAPI()
 
-isInitialized = mt5.initialize(path=Config.PATH_TO_MT5_EXE)
+isInitialized = mt5.initialize(path=Config.PATH_TO_MT5_EXE, porable=True)
 if not isInitialized:
     error_code, description = mt5.last_error()
     raise Exception(f"MT5 Initialization Failed: {error_code} - {description}")
 isLoggedIn = mt5.login(
     Config.MT5_ACCOUNT_NUMBER, Config.MT5_ACCOUNT_PASSWORD, Config.MT5_ACCOUNT_SERVER
-)
+)   
 if isInitialized and isLoggedIn:
     print("Logged in")
 else:
@@ -30,11 +30,6 @@ class TakeProfitLevel(BaseModel):
     reason: Optional[str] = None
 
 
-class TrailingStop(BaseModel):
-    activationPrice: float
-    distance: float
-
-
 class Entry(BaseModel):
     price: float
     type: str  # "limit", "stop", "market"
@@ -47,7 +42,6 @@ class TradeSignal(BaseModel):
     entry: Entry
     stopLoss: float
     takeProfits: List[TakeProfitLevel]
-    trailingStop: Optional[TrailingStop]
     confidence: float
     reason: str
     timestamp: str
@@ -59,7 +53,7 @@ async def execute_trade(signal: TradeSignal):
     try:
         return TradingService.process_signal(signal)
     finally:
-        mt5.shutdown()
+        print("Waht wen wrong")
 
 
 @app.get("/health")

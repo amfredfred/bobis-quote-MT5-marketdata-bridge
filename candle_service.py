@@ -3,8 +3,9 @@ import pytz
 from datetime import datetime, timezone as dtz
 from typing import List
 from pydantic import BaseModel, validator
-from fastapi import HTTPException, Query
-
+from fastapi import HTTPException
+from configs import Config
+from utils import clean_symbol
 
 # ========== MODELS ==========
 class Candle(BaseModel):
@@ -20,7 +21,7 @@ class CandleRequest(BaseModel):
     symbols: List[str]
     timeframes: List[str]
     limit: int = 100
-    timezone: str = TIMEZONE
+    timezone: str = Config.TIMEZONE
 
     @validator("timeframes")
     def validate_timeframes(cls, v):
@@ -62,7 +63,7 @@ class TimeframeConverter:
 # ========== SERVICE ==========
 class CandleDataService:
     @staticmethod
-    def convert_to_timezone(server_timestamp: int, tz: str = TIMEZONE) -> str:
+    def convert_to_timezone(server_timestamp: int, tz: str = Config.TIMEZONE) -> str:
         """Convert FBS broker timestamp (UTC+3) to specified local timezone.
 
         Args:
@@ -96,12 +97,11 @@ class CandleDataService:
 
     @staticmethod
     def get_candles(
-        symbol: str, timeframe: str, limit: int = 100, timezone: str = TIMEZONE
+        symbol: str, timeframe: str, limit: int = 100, timezone: str = Config.TIMEZONE
     ) -> List[Candle]:
         """Get candle data from MT5"""
         try:
             timeframe_enum = TimeframeConverter.to_mt5(timeframe)
-            print(f"symbol -> {symbol}")
             rates = mt5.copy_rates_from_pos(symbol, timeframe_enum, 0, limit)
 
             if rates is None:
@@ -141,11 +141,7 @@ class CandleDataService:
 
             return candles
         finally:
-            print("HEllo")
-
-    @staticmethod
-    def clean_symbol(symbol: str) -> str:
-        return symbol.replace("/", "").replace("_", "")
+            pass
 
     @staticmethod
     def get_multiple_timeframes(request: CandleRequest) -> dict:
@@ -156,12 +152,13 @@ class CandleDataService:
             for tf in request.timeframes:
                 try:
                     symbol_data[tf] = CandleDataService.get_candles(
-                        CandleDataService.clean_symbol(symbol),
+                        clean_symbol(symbol),
                         tf,
                         request.limit,
                         request.timezone,
                     )
                 except HTTPException as e:
+                    print(mt5.last_error())
                     symbol_data[tf] = {"error": str(e.detail)}
             result[symbol] = symbol_data
         return result

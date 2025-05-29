@@ -1,19 +1,25 @@
 GET http://127.0.0.1:8000/health HTTP/1.1
 
-### GET with query parameters (simple)
-GET http://localhost:8000/time-series?symbol=EURUSD&timeframes=1m,1h,4h,15m&limit=50
-Accept: application/json
-
 ###
-POST http://localhost:8000/time-series
+POST http://localhost:8000/trade
 Content-Type: application/json
 
 {
-  "symbol": "EURUSD",
-  "timeframes": ["1h", "4h"],
-  "limit": 50,
-  "timezone": "Africa/Lagos"
-}
-
-###
-GET http://localhost:8000/time-series?symbols=XAUUSD&timeframes=1m,5m,15m,30m,1h&limit=1&timezone=Africa/Lagos
+    "symbol": "EURGBP",
+    "direction": "SELL",
+    "entry": {
+      "price": 0.8437,
+      "type": "limit",
+      "validUntil": "2025-05-30T18:12:00.605+01:00"
+    },
+    "stopLoss": 0.8437,
+    "takeProfits": [{
+      "name":"TP1",
+      "price":0.82165,
+      "percentage":30,
+      "reason":"TP1"
+    } ],
+    "confidence": 7,
+    "reason": "Downtrend confirmed on 1H timeframe with bearish pin bar and engulfing pattern on 15M timeframe at resistance.",
+    "timestamp": "2025-05-29T17:12:00.605+01:00"
+  }

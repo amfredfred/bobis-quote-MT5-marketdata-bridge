@@ -11,11 +11,6 @@ class TakeProfitLevelDict(TypedDict):
     reason: Optional[str]
 
 
-class TrailingStopDict(TypedDict):
-    activationPrice: float
-    distance: float
-
-
 class EntryDict(TypedDict):
     price: float
     type: str  # 'limit' | 'stop' | 'market'
@@ -28,7 +23,6 @@ class StoredTradeSignalDict(TypedDict):
     entry: EntryDict
     stopLoss: float
     takeProfits: List[TakeProfitLevelDict]
-    trailingStop: Optional[TrailingStopDict]
     confidence: float
     reason: str
     timestamp: str
