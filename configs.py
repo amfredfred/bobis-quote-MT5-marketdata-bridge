@@ -1,5 +1,6 @@
 from dotenv import load_dotenv
 import os
+import logging
 
 load_dotenv()
 
@@ -11,3 +12,12 @@ class Config:
     MT5_ACCOUNT_SERVER = os.getenv("MT5_ACCOUNT_SERVER")
     PATH_TO_MT5_EXE = os.getenv("PATH_TO_MT5_EXE")
     TIMEZONE = os.getenv('TIMEZONE')
+
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    handlers=[logging.FileHandler("trading_service.log"), logging.StreamHandler()],
+)
+logger = logging.getLogger(__name__)

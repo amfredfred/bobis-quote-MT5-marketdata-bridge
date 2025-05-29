@@ -1,3 +1,5 @@
 *.env
 env/Lib
 __pycache__
+
+*.log

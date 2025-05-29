@@ -1,18 +1,11 @@
 import MetaTrader5 as mt5
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, List
-from dataclasses import dataclass
+from tradeStore import StoredTradeSignalDict
+from utils import to_utc_plus_3_from_iso
 from enum import Enum
 import traceback
-import logging
-
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    handlers=[logging.FileHandler("trading_service.log"), logging.StreamHandler()],
-)
-logger = logging.getLogger(__name__)
+from configs import logger
 
 
 class OrderType(Enum):
@@ -80,7 +73,7 @@ class TradeExecutor:
 
             if result.retcode != mt5.TRADE_RETCODE_DONE:
                 error_msg = (
-                    f"Trade failed with code {result.retcode}, {mt5.last_error()}"
+                    f"Trade failed with code {result.retcode}, {mt5.last_error()} --comment: {result.comment}"
                 )
                 logger.error(error_msg)
                 raise TradeExecutionError(error_msg)
