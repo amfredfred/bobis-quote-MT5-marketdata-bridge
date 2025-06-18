@@ -68,7 +68,7 @@ async def get_time_series_body(request: CandleRequest):
     """
     Get candle data via POST request with body
     Example: {"symbols": ["EURUSD", "GBPUSD"], "timeframes": ["1h", "4h"], "limit": 50}
-    """
+    """ 
     return CandleDataService.get_multiple_timeframes(request)
 
 

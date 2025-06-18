@@ -3,3 +3,4 @@ env/Lib
 __pycache__
 
 *.log
+.log

@@ -2,7 +2,7 @@ import MetaTrader5 as mt5
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, List
 from tradeStore import StoredTradeSignalDict
-from utils import to_utc_plus_3_from_iso
+from utils import to_mt5_expiration_timestamp
 from enum import Enum
 import traceback
 from configs import logger
@@ -56,7 +56,7 @@ class TradeExecutor:
     """Handles execution of trade operations"""
 
     MAGIC_NUMBER = 202508  # Unique identifier for EA trades
-    DEFAULT_DEVIATION = 10  # Max price deviation for execution
+    DEFAULT_DEVIATION = 35  # Max price deviation for execution
 
     @staticmethod
     def execute_order(request: Dict[str, Any]) -> Dict[str, Any]:
@@ -66,16 +66,17 @@ class TradeExecutor:
                 raise TradeExecutionError("MT5 initialization failed")
 
             result = mt5.order_send(request)
+
             if not result:
                 error_msg = f"Error executing trade -> {mt5.last_error()}"
                 logger.error(error_msg)
+                print(f"result - > ${result}")
                 raise TradeExecutionError(error_msg)
 
             if result.retcode != mt5.TRADE_RETCODE_DONE:
-                error_msg = (
-                    f"Trade failed with code {result.retcode}, {mt5.last_error()} --comment: {result.comment}"
-                )
+                error_msg = f"Trade failed with code {result.retcode}, {mt5.last_error()} --comment: {result.comment}"
                 logger.error(error_msg)
+                print(f"result - > ${result}")
                 raise TradeExecutionError(error_msg)
 
             logger.info(f"Order executed successfully: {result}")
@@ -96,10 +97,10 @@ class TradeExecutor:
         sl: Optional[float] = None,
         tp: Optional[float] = None,
         is_pending: bool = False,
-        expiration: Optional[datetime] = None,
+        expiration: Optional[int] = None,
         comment: str = "Comment",
     ) -> Dict[str, Any]:
-        """Create trade request dictionary"""
+        """Create a flexible trade request dictionary compatible with different trade types."""
         try:
             request = {
                 "action": (
@@ -109,17 +110,25 @@ class TradeExecutor:
                 "volume": volume,
                 "type": order_type.value,
                 "price": price,
-                "sl": sl,
-                "tp": tp,
                 "deviation": TradeExecutor.DEFAULT_DEVIATION,
                 "magic": TradeExecutor.MAGIC_NUMBER,
                 "comment": comment,
-                "type_time": (
-                    mt5.ORDER_TIME_GTC if not expiration else mt5.ORDER_TIME_SPECIFIED
-                ),
                 "type_filling": mt5.ORDER_FILLING_IOC,
-                "expiration": int(expiration.timestamp()) if expiration else None,
             }
+
+            # Optional fields - only set if not None
+            if sl is not None:
+                request["sl"] = sl
+            if tp is not None:
+                request["tp"] = tp
+
+            # Time type logic
+            if expiration:
+                request["type_time"] = mt5.ORDER_TIME_SPECIFIED
+                request["expiration"] = int(expiration)
+            else:
+                request["type_time"] = mt5.ORDER_TIME_GTC
+
             logger.debug(f"Created trade request: {request}")
             return request
 
@@ -252,12 +261,50 @@ class TradeValidator:
             raise
 
     @staticmethod
+    def check_pending_orders(symbol: str) -> bool:
+        """
+        Check for existing pending orders on the same symbol
+        Returns True if no conflicting orders exist or if conflicting orders were successfully removed
+        """
+        try:
+            if not mt5.initialize():
+                raise TradeError("MT5 initialization failed")
+
+            # Get all pending orders for this symbol
+            orders = mt5.orders_get(symbol=symbol)
+            if not orders:
+                return True  # No pending orders
+            return False
+
+        except Exception as e:
+            logger.error(f"Error checking pending orders for {symbol}: {str(e)}")
+            raise TradeValidationError(f"Pending order check failed: {str(e)}") from e
+
+    @staticmethod
     def check_existing_positions(symbol: str) -> bool:
         """
-        Check existing positions for the symbol and apply logic:
-        - If profitable and old enough: move to breakeven
-        - If losing and old enough: close position
-        - Returns True if new trade can be placed
+        Enhanced version that checks both open positions AND pending orders
+        """
+        try:
+            # First check open positions
+            if not TradeValidator._check_open_positions(symbol):
+                return False
+
+            # Then check pending orders
+            if not TradeValidator.check_pending_orders(symbol):
+                return False
+
+            return True
+
+        except Exception as e:
+            logger.error(f"Error checking existing trades for {symbol}: {str(e)}")
+            raise TradeValidationError(f"Trade validation failed: {str(e)}") from e
+
+    @staticmethod
+    def _check_open_positions(symbol: str) -> bool:
+        """
+        Internal method to handle just the open positions logic
+        (This is your original check_existing_positions implementation)
         """
         try:
             if not mt5.initialize():
@@ -280,7 +327,6 @@ class TradeValidator:
                         PositionManager.close_position(pos.ticket)
                         return True
                     else:
-                        # Recent or neutral position exists - don't open new one
                         logger.info(
                             f"Active position exists for {symbol} - not opening new trade"
                         )
@@ -292,9 +338,8 @@ class TradeValidator:
             return True
 
         except Exception as e:
-            logger.error(f"Error checking existing positions for {symbol}: {str(e)}")
-            raise TradeValidationError(f"Position check failed: {str(e)}") from e
-
+            logger.error(f"Error checking open positions for {symbol}: {str(e)}")
+            raise
 
 class TradingService:
     """Main trading service that orchestrates all operations"""
@@ -312,8 +357,8 @@ class TradingService:
             try:
                 # Validate symbol and position conditions
                 TradeValidator.validate_symbol(signal.symbol)
-                if not TradeValidator.check_existing_positions(signal.symbol):
-                    msg = "Existing position blocks new trade"
+                if not TradeValidator.check_existing_positions(signal.symbol):  # Now checks both
+                    msg = "Existing position or pending order blocks new trade"
                     logger.info(msg)
                     return {"status": "skipped", "message": msg}
 
@@ -331,7 +376,9 @@ class TradingService:
                     tp=signal.takeProfits[0].price if signal.takeProfits else None,
                     is_pending=signal.entry.type != "market",
                     expiration=(
-                        to_utc_plus_3_from_iso(signal.entry.validUntil)
+                        to_mt5_expiration_timestamp(
+                            signal.entry.validUntil, signal.symbol
+                        )
                         if signal.entry.validUntil
                         else None
                     ),
