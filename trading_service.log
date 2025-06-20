@@ -1,0 +1,234 @@
+2025-06-19 10:04:06,254 - configs - INFO - Existing position or pending order blocks new trade
+2025-06-19 12:58:00,505 - configs - WARNING - No stop loss pips provided, using default position size
+2025-06-19 12:58:00,550 - configs - ERROR - Trade failed with code 10015, (1, 'Success') --comment: Invalid price
+2025-06-19 12:58:00,550 - configs - ERROR - Trade failed with code 10015, (1, 'Success') --comment: Invalid price
+2025-06-19 12:58:00,550 - configs - ERROR - Trade Execution Error: Trade failed with code 10015, (1, 'Success') --comment: Invalid price
+2025-06-19 12:58:00,550 - configs - ERROR - Unexpected error in execute_order: Trade failed with code 10015, (1, 'Success') --comment: Invalid price
+Traceback (most recent call last):
+  File "C:\Workspace\Bots\mt5-trading-api\trading.py", line 80, in execute_order
+    raise TradeExecutionError(error_msg)
+trading.TradeExecutionError: Trade failed with code 10015, (1, 'Success') --comment: Invalid price
+
+2025-06-19 12:58:00,552 - configs - ERROR - Order execution failed: Trade failed with code 10015, (1, 'Success') --comment: Invalid price
+2025-06-19 12:58:00,552 - configs - ERROR - Trade Execution Error: Order execution failed: Trade failed with code 10015, (1, 'Success') --comment: Invalid price
+2025-06-19 12:58:00,553 - configs - ERROR - Trade error processing signal: Order execution failed: Trade failed with code 10015, (1, 'Success') --comment: Invalid price
+2025-06-19 13:28:04,895 - configs - WARNING - No stop loss pips provided, using default position size
+2025-06-19 13:28:04,905 - configs - ERROR - Trade failed with code 10015, (1, 'Success') --comment: Invalid price
+2025-06-19 13:28:04,909 - configs - ERROR - Trade failed with code 10015, (1, 'Success') --comment: Invalid price
+2025-06-19 13:28:04,909 - configs - ERROR - Trade Execution Error: Trade failed with code 10015, (1, 'Success') --comment: Invalid price
+2025-06-19 13:28:04,909 - configs - ERROR - Unexpected error in execute_order: Trade failed with code 10015, (1, 'Success') --comment: Invalid price
+Traceback (most recent call last):
+  File "C:\Workspace\Bots\mt5-trading-api\trading.py", line 80, in execute_order
+    raise TradeExecutionError(error_msg)
+trading.TradeExecutionError: Trade failed with code 10015, (1, 'Success') --comment: Invalid price
+
+2025-06-19 13:28:04,910 - configs - ERROR - Order execution failed: Trade failed with code 10015, (1, 'Success') --comment: Invalid price
+2025-06-19 13:28:04,910 - configs - ERROR - Trade Execution Error: Order execution failed: Trade failed with code 10015, (1, 'Success') --comment: Invalid price
+2025-06-19 13:28:04,910 - configs - ERROR - Trade error processing signal: Order execution failed: Trade failed with code 10015, (1, 'Success') --comment: Invalid price
+2025-06-19 14:27:58,616 - configs - INFO - Processing signal: symbol='GBPUSD' direction='SELL' entry=Entry(price=1.34202, type='limit', validUntil='2025-06-19T12:55:25.242+01:00') stopLoss=1.34402 takeProfits=[TakeProfitLevel(name='TP1', price=1.33852, percentage=50.0, reason='First take profit level based on 35 pips from entry'), TakeProfitLevel(name='TP2', price=1.33702, percentage=30.0, reason='Second take profit level based on additional 35 pips from TP1'), TakeProfitLevel(name='TP3', price=1.33552, percentage=20.0, reason='Third take profit level based on additional 35 pips from TP2')] confidence=75.0 reason='Downtrend confirmed on 1H timeframe with bearish pin bar and engulfing pattern on 15M timeframe. Risk to reward ratio meets the minimum requirement of 1:2.' timestamp='2025-06-19T11:55:25.242+01:00'
+2025-06-19 14:27:58,674 - configs - WARNING - No stop loss pips provided, using default position size
+2025-06-19 14:27:58,696 - configs - ERROR - Trade failed with code 10015, (1, 'Success') --comment: Invalid price
+2025-06-19 14:27:58,696 - configs - ERROR - Trade failed with code 10015, (1, 'Success') --comment: Invalid price
+2025-06-19 14:27:58,696 - configs - ERROR - Trade Execution Error: Trade failed with code 10015, (1, 'Success') --comment: Invalid price
+2025-06-19 14:27:58,696 - configs - ERROR - Unexpected error in execute_order: Trade failed with code 10015, (1, 'Success') --comment: Invalid price
+Traceback (most recent call last):
+  File "C:\Workspace\Bots\mt5-trading-api\trading.py", line 80, in execute_order
+    raise TradeExecutionError(error_msg)
+trading.TradeExecutionError: Trade failed with code 10015, (1, 'Success') --comment: Invalid price
+
+2025-06-19 14:27:58,701 - configs - ERROR - Order execution failed: Trade failed with code 10015, (1, 'Success') --comment: Invalid price
+2025-06-19 14:27:58,701 - configs - ERROR - Trade Execution Error: Order execution failed: Trade failed with code 10015, (1, 'Success') --comment: Invalid price
+2025-06-19 14:27:58,701 - configs - ERROR - Trade error processing signal: Order execution failed: Trade failed with code 10015, (1, 'Success') --comment: Invalid price
+2025-06-19 14:42:57,636 - configs - INFO - Active position exists for GBPJPY - not opening new trade
+2025-06-19 14:42:57,637 - configs - INFO - Existing position or pending order blocks new trade
+2025-06-19 14:57:58,862 - configs - INFO - Processing signal: symbol='GBPUSD' direction='SELL' entry=Entry(price=1.34202, type='limit', validUntil='2025-06-19T12:55:25.242+01:00') stopLoss=1.34402 takeProfits=[TakeProfitLevel(name='TP1', price=1.33852, percentage=50.0, reason='First take profit level based on 35 pips from entry'), TakeProfitLevel(name='TP2', price=1.33702, percentage=30.0, reason='Second take profit level based on additional 35 pips'), TakeProfitLevel(name='TP3', price=1.33552, percentage=20.0, reason='Final take profit level based on additional 35 pips')] confidence=75.0 reason='Downtrend confirmed on 1H timeframe with bearish pin bar and engulfing pattern on 15M timeframe. Risk to reward ratio meets the minimum requirement of 1:2.' timestamp='2025-06-19T11:55:25.242+01:00'
+2025-06-19 14:57:58,913 - configs - WARNING - No stop loss pips provided, using default position size
+2025-06-19 14:57:58,940 - configs - ERROR - Trade failed with code 10015, (1, 'Success') --comment: Invalid price
+2025-06-19 14:57:58,940 - configs - ERROR - Trade failed with code 10015, (1, 'Success') --comment: Invalid price
+2025-06-19 14:57:58,940 - configs - ERROR - Trade Execution Error: Trade failed with code 10015, (1, 'Success') --comment: Invalid price
+2025-06-19 14:57:58,940 - configs - ERROR - Unexpected error in execute_order: Trade failed with code 10015, (1, 'Success') --comment: Invalid price
+Traceback (most recent call last):
+  File "C:\Workspace\Bots\mt5-trading-api\trading.py", line 80, in execute_order
+    raise TradeExecutionError(error_msg)
+trading.TradeExecutionError: Trade failed with code 10015, (1, 'Success') --comment: Invalid price
+
+2025-06-19 14:57:58,944 - configs - ERROR - Order execution failed: Trade failed with code 10015, (1, 'Success') --comment: Invalid price
+2025-06-19 14:57:58,944 - configs - ERROR - Trade Execution Error: Order execution failed: Trade failed with code 10015, (1, 'Success') --comment: Invalid price
+2025-06-19 14:57:58,944 - configs - ERROR - Trade error processing signal: Order execution failed: Trade failed with code 10015, (1, 'Success') --comment: Invalid price
+2025-06-19 15:12:59,496 - configs - INFO - Successfully moved position 3973459779 to breakeven
+2025-06-19 15:12:59,539 - configs - WARNING - No stop loss pips provided, using default position size
+2025-06-19 15:12:59,575 - configs - ERROR - Trade failed with code 10015, (1, 'Success') --comment: Invalid price
+2025-06-19 15:12:59,576 - configs - ERROR - Trade failed with code 10015, (1, 'Success') --comment: Invalid price
+2025-06-19 15:12:59,576 - configs - ERROR - Trade Execution Error: Trade failed with code 10015, (1, 'Success') --comment: Invalid price
+2025-06-19 15:12:59,576 - configs - ERROR - Unexpected error in execute_order: Trade failed with code 10015, (1, 'Success') --comment: Invalid price
+Traceback (most recent call last):
+  File "C:\Workspace\Bots\mt5-trading-api\trading.py", line 80, in execute_order
+    raise TradeExecutionError(error_msg)
+trading.TradeExecutionError: Trade failed with code 10015, (1, 'Success') --comment: Invalid price
+
+2025-06-19 15:12:59,577 - configs - ERROR - Order execution failed: Trade failed with code 10015, (1, 'Success') --comment: Invalid price
+2025-06-19 15:12:59,577 - configs - ERROR - Trade Execution Error: Order execution failed: Trade failed with code 10015, (1, 'Success') --comment: Invalid price
+2025-06-19 15:12:59,577 - configs - ERROR - Trade error processing signal: Order execution failed: Trade failed with code 10015, (1, 'Success') --comment: Invalid price
+2025-06-19 15:27:59,142 - configs - ERROR - Failed to modify position: 10025
+2025-06-19 15:27:59,142 - configs - ERROR - Failed to modify position: 10025
+2025-06-19 15:27:59,142 - configs - ERROR - Trade Execution Error: Failed to modify position: 10025
+2025-06-19 15:27:59,142 - configs - ERROR - Error moving position 3973459779 to breakeven: Failed to modify position: 10025
+2025-06-19 15:27:59,157 - configs - WARNING - No stop loss pips provided, using default position size
+2025-06-19 15:27:59,517 - configs - INFO - Order executed successfully: OrderSendResult(retcode=10009, deal=0, order=3976185262, volume=0.01, price=0.0, bid=0.0, ask=0.0, comment='Request executed', request_id=984051716, retcode_external=0, request=TradeRequest(action=5, magic=202508, order=0, symbol='EURUSD', volume=0.01, price=1.14717, stoplimit=0.0, sl=1.14917, tp=1.14367, deviation=35, type=3, type_filling=1, type_time=2, expiration=1750357620, comment='Trade open EURUSD', position=0, position_by=0))
+2025-06-19 15:27:59,532 - configs - INFO - Successfully processed signal: {'status': 'placed', 'order': {'retcode': 10009, 'deal': 0, 'order': 3976185262, 'volume': 0.01, 'price': 0.0, 'bid': 0.0, 'ask': 0.0, 'comment': 'Request executed', 'request_id': 984051716, 'retcode_external': 0, 'request': TradeRequest(action=5, magic=202508, order=0, symbol='EURUSD', volume=0.01, price=1.14717, stoplimit=0.0, sl=1.14917, tp=1.14367, deviation=35, type=3, type_filling=1, type_time=2, expiration=1750357620, comment='Trade open EURUSD', position=0, position_by=0)}}
+2025-06-19 16:57:58,953 - configs - WARNING - No stop loss pips provided, using default position size
+2025-06-19 16:57:58,976 - configs - ERROR - Trade failed with code 10015, (1, 'Success') --comment: Invalid price
+2025-06-19 16:57:58,976 - configs - ERROR - Trade failed with code 10015, (1, 'Success') --comment: Invalid price
+2025-06-19 16:57:58,976 - configs - ERROR - Trade Execution Error: Trade failed with code 10015, (1, 'Success') --comment: Invalid price
+2025-06-19 16:57:58,977 - configs - ERROR - Unexpected error in execute_order: Trade failed with code 10015, (1, 'Success') --comment: Invalid price
+Traceback (most recent call last):
+  File "C:\Workspace\Bots\mt5-trading-api\trading.py", line 80, in execute_order
+    raise TradeExecutionError(error_msg)
+trading.TradeExecutionError: Trade failed with code 10015, (1, 'Success') --comment: Invalid price
+
+2025-06-19 16:57:58,977 - configs - ERROR - Order execution failed: Trade failed with code 10015, (1, 'Success') --comment: Invalid price
+2025-06-19 16:57:58,979 - configs - ERROR - Trade Execution Error: Order execution failed: Trade failed with code 10015, (1, 'Success') --comment: Invalid price
+2025-06-19 16:57:58,979 - configs - ERROR - Trade error processing signal: Order execution failed: Trade failed with code 10015, (1, 'Success') --comment: Invalid price
+2025-06-19 17:12:56,271 - configs - WARNING - No stop loss pips provided, using default position size
+2025-06-19 17:12:56,285 - configs - ERROR - Trade failed with code 10015, (1, 'Success') --comment: Invalid price
+2025-06-19 17:12:56,286 - configs - ERROR - Trade failed with code 10015, (1, 'Success') --comment: Invalid price
+2025-06-19 17:12:56,286 - configs - ERROR - Trade Execution Error: Trade failed with code 10015, (1, 'Success') --comment: Invalid price
+2025-06-19 17:12:56,286 - configs - ERROR - Unexpected error in execute_order: Trade failed with code 10015, (1, 'Success') --comment: Invalid price
+Traceback (most recent call last):
+  File "C:\Workspace\Bots\mt5-trading-api\trading.py", line 80, in execute_order
+    raise TradeExecutionError(error_msg)
+trading.TradeExecutionError: Trade failed with code 10015, (1, 'Success') --comment: Invalid price
+
+2025-06-19 17:12:56,287 - configs - ERROR - Order execution failed: Trade failed with code 10015, (1, 'Success') --comment: Invalid price
+2025-06-19 17:12:56,288 - configs - ERROR - Trade Execution Error: Order execution failed: Trade failed with code 10015, (1, 'Success') --comment: Invalid price
+2025-06-19 17:12:56,288 - configs - ERROR - Trade error processing signal: Order execution failed: Trade failed with code 10015, (1, 'Success') --comment: Invalid price
+2025-06-19 17:42:58,653 - configs - INFO - Processing signal: symbol='EURUSD' direction='BUY' entry=Entry(price=1.1469, type='limit', validUntil='2025-06-19T12:54:25.242+01:00') stopLoss=1.1449 takeProfits=[TakeProfitLevel(name='TP1', price=1.1504, percentage=50.0, reason='First take profit level based on recent swing high'), TakeProfitLevel(name='TP2', price=1.1539, percentage=50.0, reason='Second take profit level based on historical resistance')] confidence=75.0 reason='Uptrend confirmed on 1H timeframe with bullish pin bar and engulfing pattern on 15M timeframe. Entry at swing low with adequate RRR.' timestamp='2025-06-19T11:55:25.242+01:00'
+2025-06-19 17:42:58,701 - configs - WARNING - No stop loss pips provided, using default position size
+2025-06-19 17:42:58,728 - configs - ERROR - Trade failed with code 10015, (1, 'Success') --comment: Invalid price
+2025-06-19 17:42:58,728 - configs - ERROR - Trade failed with code 10015, (1, 'Success') --comment: Invalid price
+2025-06-19 17:42:58,728 - configs - ERROR - Trade Execution Error: Trade failed with code 10015, (1, 'Success') --comment: Invalid price
+2025-06-19 17:42:58,728 - configs - ERROR - Unexpected error in execute_order: Trade failed with code 10015, (1, 'Success') --comment: Invalid price
+Traceback (most recent call last):
+  File "C:\Workspace\Bots\mt5-trading-api\trading.py", line 80, in execute_order
+    raise TradeExecutionError(error_msg)
+trading.TradeExecutionError: Trade failed with code 10015, (1, 'Success') --comment: Invalid price
+
+2025-06-19 17:42:58,732 - configs - ERROR - Order execution failed: Trade failed with code 10015, (1, 'Success') --comment: Invalid price
+2025-06-19 17:42:58,732 - configs - ERROR - Trade Execution Error: Order execution failed: Trade failed with code 10015, (1, 'Success') --comment: Invalid price
+2025-06-19 17:42:58,732 - configs - ERROR - Trade error processing signal: Order execution failed: Trade failed with code 10015, (1, 'Success') --comment: Invalid price
+2025-06-19 17:57:56,292 - configs - WARNING - No stop loss pips provided, using default position size
+2025-06-19 17:57:56,458 - configs - ERROR - Trade failed with code 10019, (1, 'Success') --comment: No money
+2025-06-19 17:57:56,458 - configs - ERROR - Trade failed with code 10019, (1, 'Success') --comment: No money
+2025-06-19 17:57:56,458 - configs - ERROR - Trade Execution Error: Trade failed with code 10019, (1, 'Success') --comment: No money
+2025-06-19 17:57:56,458 - configs - ERROR - Unexpected error in execute_order: Trade failed with code 10019, (1, 'Success') --comment: No money
+Traceback (most recent call last):
+  File "C:\Workspace\Bots\mt5-trading-api\trading.py", line 80, in execute_order
+    raise TradeExecutionError(error_msg)
+trading.TradeExecutionError: Trade failed with code 10019, (1, 'Success') --comment: No money
+
+2025-06-19 17:57:56,458 - configs - ERROR - Order execution failed: Trade failed with code 10019, (1, 'Success') --comment: No money
+2025-06-19 17:57:56,458 - configs - ERROR - Trade Execution Error: Order execution failed: Trade failed with code 10019, (1, 'Success') --comment: No money
+2025-06-19 17:57:56,458 - configs - ERROR - Trade error processing signal: Order execution failed: Trade failed with code 10019, (1, 'Success') --comment: No money
+2025-06-19 18:42:56,495 - configs - INFO - Processing signal: symbol='USDCAD' direction='BUY' entry=Entry(price=1.37134, type='limit', validUntil='2025-06-19T12:55:25.242+01:00') stopLoss=1.36934 takeProfits=[TakeProfitLevel(name='TP1', price=1.37484, percentage=50.0, reason='First resistance level'), TakeProfitLevel(name='TP2', price=1.37634, percentage=30.0, reason='Second resistance level'), TakeProfitLevel(name='TP3', price=1.37784, percentage=20.0, reason='Third resistance level')] confidence=75.0 reason='Uptrend confirmed with bullish pin bar at support and engulfing pattern on the 1H timeframe. Entry triggered by bullish pin bar at support on the 5M timeframe.' timestamp='2025-06-19T11:55:25.242+01:00'
+2025-06-19 18:42:56,714 - configs - WARNING - No stop loss pips provided, using default position size
+2025-06-19 18:42:57,386 - configs - ERROR - Trade failed with code 10019, (1, 'Success') --comment: No money
+2025-06-19 18:42:57,386 - configs - ERROR - Trade failed with code 10019, (1, 'Success') --comment: No money
+2025-06-19 18:42:57,386 - configs - ERROR - Trade Execution Error: Trade failed with code 10019, (1, 'Success') --comment: No money
+2025-06-19 18:42:57,386 - configs - ERROR - Unexpected error in execute_order: Trade failed with code 10019, (1, 'Success') --comment: No money
+Traceback (most recent call last):
+  File "C:\Workspace\Bots\mt5-trading-api\trading.py", line 80, in execute_order
+    raise TradeExecutionError(error_msg)
+trading.TradeExecutionError: Trade failed with code 10019, (1, 'Success') --comment: No money
+
+2025-06-19 18:42:57,386 - configs - ERROR - Order execution failed: Trade failed with code 10019, (1, 'Success') --comment: No money
+2025-06-19 18:42:57,386 - configs - ERROR - Trade Execution Error: Order execution failed: Trade failed with code 10019, (1, 'Success') --comment: No money
+2025-06-19 18:42:57,386 - configs - ERROR - Trade error processing signal: Order execution failed: Trade failed with code 10019, (1, 'Success') --comment: No money
+2025-06-19 19:42:57,084 - configs - INFO - Processing signal: symbol='GBPUSD' direction='SELL' entry=Entry(price=1.3425, type='limit', validUntil='2025-06-19T12:55:25.242+01:00') stopLoss=1.3445 takeProfits=[TakeProfitLevel(name='TP1', price=1.339, percentage=50.0, reason='First take profit level based on recent swing low'), TakeProfitLevel(name='TP2', price=1.3365, percentage=30.0, reason='Second take profit level targeting next liquidity zone'), TakeProfitLevel(name='TP3', price=1.334, percentage=20.0, reason='Final take profit level for extended downtrend')] confidence=75.0 reason='Downtrend confirmed on 1H timeframe with bearish pin bar and engulfing pattern on 15M. Entry triggered by bearish pin bar at resistance.' timestamp='2025-06-19T11:55:25.242+01:00'
+2025-06-19 19:42:57,142 - configs - WARNING - No stop loss pips provided, using default position size
+2025-06-19 19:42:57,157 - configs - ERROR - Trade failed with code 10015, (1, 'Success') --comment: Invalid price
+2025-06-19 19:42:57,158 - configs - ERROR - Trade failed with code 10015, (1, 'Success') --comment: Invalid price
+2025-06-19 19:42:57,158 - configs - ERROR - Trade Execution Error: Trade failed with code 10015, (1, 'Success') --comment: Invalid price
+2025-06-19 19:42:57,159 - configs - ERROR - Unexpected error in execute_order: Trade failed with code 10015, (1, 'Success') --comment: Invalid price
+Traceback (most recent call last):
+  File "C:\Workspace\Bots\mt5-trading-api\trading.py", line 80, in execute_order
+    raise TradeExecutionError(error_msg)
+trading.TradeExecutionError: Trade failed with code 10015, (1, 'Success') --comment: Invalid price
+
+2025-06-19 19:42:57,159 - configs - ERROR - Order execution failed: Trade failed with code 10015, (1, 'Success') --comment: Invalid price
+2025-06-19 19:42:57,159 - configs - ERROR - Trade Execution Error: Order execution failed: Trade failed with code 10015, (1, 'Success') --comment: Invalid price
+2025-06-19 19:42:57,160 - configs - ERROR - Trade error processing signal: Order execution failed: Trade failed with code 10015, (1, 'Success') --comment: Invalid price
+2025-06-19 20:24:09,952 - configs - INFO - Processing signal: symbol='XAUUSD' direction='BUY' entry=Entry(price=3373.7, type='limit', validUntil='2025-06-19T20:53:41.891+01:00') stopLoss=3353.7 takeProfits=[TakeProfitLevel(name='TP1', price=3408.7, percentage=50.0, reason='First take profit level based on 35 pips from entry'), TakeProfitLevel(name='TP2', price=3443.7, percentage=30.0, reason='Second take profit level based on additional 35 pips'), TakeProfitLevel(name='TP3', price=3478.7, percentage=20.0, reason='Final take profit level based on additional 35 pips')] confidence=75.0 reason='Uptrend confirmed on 1H timeframe with bullish engulfing pattern on 15M timeframe. Entry triggered by pin bar at support.' timestamp='2025-06-19T19:53:41.891+01:00'
+2025-06-19 20:24:10,005 - configs - WARNING - No stop loss pips provided, using default position size
+2025-06-19 20:24:10,022 - configs - ERROR - Trade failed with code 10015, (1, 'Success') --comment: Invalid price
+2025-06-19 20:24:10,022 - configs - ERROR - Trade failed with code 10015, (1, 'Success') --comment: Invalid price
+2025-06-19 20:24:10,022 - configs - ERROR - Trade Execution Error: Trade failed with code 10015, (1, 'Success') --comment: Invalid price
+2025-06-19 20:24:10,023 - configs - ERROR - Unexpected error in execute_order: Trade failed with code 10015, (1, 'Success') --comment: Invalid price
+Traceback (most recent call last):
+  File "C:\Workspace\Bots\mt5-trading-api\trading.py", line 80, in execute_order
+    raise TradeExecutionError(error_msg)
+trading.TradeExecutionError: Trade failed with code 10015, (1, 'Success') --comment: Invalid price
+
+2025-06-19 20:24:10,023 - configs - ERROR - Order execution failed: Trade failed with code 10015, (1, 'Success') --comment: Invalid price
+2025-06-19 20:24:10,024 - configs - ERROR - Trade Execution Error: Order execution failed: Trade failed with code 10015, (1, 'Success') --comment: Invalid price
+2025-06-19 20:24:10,024 - configs - ERROR - Trade error processing signal: Order execution failed: Trade failed with code 10015, (1, 'Success') --comment: Invalid price
+2025-06-19 20:39:09,691 - configs - INFO - Processing signal: symbol='XAUUSD' direction='BUY' entry=Entry(price=3373.7, type='limit', validUntil='2025-06-19T20:53:41.891+01:00') stopLoss=3353.7 takeProfits=[TakeProfitLevel(name='TP1', price=3408.7, percentage=50.0, reason='First take profit level based on recent swing high'), TakeProfitLevel(name='TP2', price=3423.7, percentage=30.0, reason='Second take profit level based on historical resistance'), TakeProfitLevel(name='TP3', price=3438.7, percentage=20.0, reason='Final take profit level targeting extended gains')] confidence=75.0 reason='Uptrend confirmed on 1H timeframe with bullish engulfing pattern on 15M. Entry triggered by pin bar at support with engulfing pattern. Risk to reward ratio meets the minimum requirement of 1:2 with potential for 35 pips profit.' timestamp='2025-06-19T19:53:41.891+01:00'
+2025-06-19 20:39:09,754 - configs - WARNING - No stop loss pips provided, using default position size
+2025-06-19 20:39:09,770 - configs - ERROR - Trade failed with code 10015, (1, 'Success') --comment: Invalid price
+2025-06-19 20:39:09,770 - configs - ERROR - Trade failed with code 10015, (1, 'Success') --comment: Invalid price
+2025-06-19 20:39:09,770 - configs - ERROR - Trade Execution Error: Trade failed with code 10015, (1, 'Success') --comment: Invalid price
+2025-06-19 20:39:09,771 - configs - ERROR - Unexpected error in execute_order: Trade failed with code 10015, (1, 'Success') --comment: Invalid price
+Traceback (most recent call last):
+  File "C:\Workspace\Bots\mt5-trading-api\trading.py", line 80, in execute_order
+    raise TradeExecutionError(error_msg)
+trading.TradeExecutionError: Trade failed with code 10015, (1, 'Success') --comment: Invalid price
+
+2025-06-19 20:39:09,772 - configs - ERROR - Order execution failed: Trade failed with code 10015, (1, 'Success') --comment: Invalid price
+2025-06-19 20:39:09,772 - configs - ERROR - Trade Execution Error: Order execution failed: Trade failed with code 10015, (1, 'Success') --comment: Invalid price
+2025-06-19 20:39:09,772 - configs - ERROR - Trade error processing signal: Order execution failed: Trade failed with code 10015, (1, 'Success') --comment: Invalid price
+2025-06-19 20:54:13,175 - configs - WARNING - No stop loss pips provided, using default position size
+2025-06-19 20:54:13,192 - configs - ERROR - Trade failed with code 10015, (1, 'Success') --comment: Invalid price
+2025-06-19 20:54:13,223 - configs - ERROR - Trade failed with code 10015, (1, 'Success') --comment: Invalid price
+2025-06-19 20:54:13,223 - configs - ERROR - Trade Execution Error: Trade failed with code 10015, (1, 'Success') --comment: Invalid price
+2025-06-19 20:54:13,223 - configs - ERROR - Unexpected error in execute_order: Trade failed with code 10015, (1, 'Success') --comment: Invalid price
+Traceback (most recent call last):
+  File "C:\Workspace\Bots\mt5-trading-api\trading.py", line 80, in execute_order
+    raise TradeExecutionError(error_msg)
+trading.TradeExecutionError: Trade failed with code 10015, (1, 'Success') --comment: Invalid price
+
+2025-06-19 20:54:13,223 - configs - ERROR - Order execution failed: Trade failed with code 10015, (1, 'Success') --comment: Invalid price
+2025-06-19 20:54:13,223 - configs - ERROR - Trade Execution Error: Order execution failed: Trade failed with code 10015, (1, 'Success') --comment: Invalid price
+2025-06-19 20:54:13,223 - configs - ERROR - Trade error processing signal: Order execution failed: Trade failed with code 10015, (1, 'Success') --comment: Invalid price
+2025-06-19 21:39:13,605 - configs - WARNING - No stop loss pips provided, using default position size
+2025-06-19 21:39:13,617 - configs - ERROR - Trade failed with code 10015, (1, 'Success') --comment: Invalid price
+2025-06-19 21:39:13,617 - configs - ERROR - Trade failed with code 10015, (1, 'Success') --comment: Invalid price
+2025-06-19 21:39:13,617 - configs - ERROR - Trade Execution Error: Trade failed with code 10015, (1, 'Success') --comment: Invalid price
+2025-06-19 21:39:13,617 - configs - ERROR - Unexpected error in execute_order: Trade failed with code 10015, (1, 'Success') --comment: Invalid price
+Traceback (most recent call last):
+  File "C:\Workspace\Bots\mt5-trading-api\trading.py", line 80, in execute_order
+    raise TradeExecutionError(error_msg)
+trading.TradeExecutionError: Trade failed with code 10015, (1, 'Success') --comment: Invalid price
+
+2025-06-19 21:39:13,619 - configs - ERROR - Order execution failed: Trade failed with code 10015, (1, 'Success') --comment: Invalid price
+2025-06-19 21:39:13,619 - configs - ERROR - Trade Execution Error: Order execution failed: Trade failed with code 10015, (1, 'Success') --comment: Invalid price
+2025-06-19 21:39:13,619 - configs - ERROR - Trade error processing signal: Order execution failed: Trade failed with code 10015, (1, 'Success') --comment: Invalid price
+2025-06-19 21:54:11,782 - configs - INFO - Processing signal: symbol='USDCAD' direction='BUY' entry=Entry(price=1.37117, type='limit', validUntil='2025-06-19T20:53:41.891+01:00') stopLoss=1.36917 takeProfits=[TakeProfitLevel(name='TP1', price=1.37467, percentage=50.0, reason='First take profit level based on recent swing high'), TakeProfitLevel(name='TP2', price=1.37617, percentage=30.0, reason='Second take profit level extending beyond recent swing high'), TakeProfitLevel(name='TP3', price=1.37767, percentage=20.0, reason='Final take profit level targeting a significant resistance area')] confidence=75.0 reason='Bullish pin bar at support with engulfing pattern on the 15M timeframe, confirmed by an uptrend on the 1H timeframe. Risk to reward ratio meets the minimum requirement of 1:2 with over 35 pips profit potential.' timestamp='2025-06-19T19:53:41.891+01:00'
+2025-06-19 21:54:11,834 - configs - WARNING - No stop loss pips provided, using default position size
+2025-06-19 21:54:11,849 - configs - ERROR - Trade failed with code 10015, (1, 'Success') --comment: Invalid price
+2025-06-19 21:54:11,849 - configs - ERROR - Trade failed with code 10015, (1, 'Success') --comment: Invalid price
+2025-06-19 21:54:11,849 - configs - ERROR - Trade Execution Error: Trade failed with code 10015, (1, 'Success') --comment: Invalid price
+2025-06-19 21:54:11,850 - configs - ERROR - Unexpected error in execute_order: Trade failed with code 10015, (1, 'Success') --comment: Invalid price
+Traceback (most recent call last):
+  File "C:\Workspace\Bots\mt5-trading-api\trading.py", line 80, in execute_order
+    raise TradeExecutionError(error_msg)
+trading.TradeExecutionError: Trade failed with code 10015, (1, 'Success') --comment: Invalid price
+
+2025-06-19 21:54:11,851 - configs - ERROR - Order execution failed: Trade failed with code 10015, (1, 'Success') --comment: Invalid price
+2025-06-19 21:54:11,852 - configs - ERROR - Trade Execution Error: Order execution failed: Trade failed with code 10015, (1, 'Success') --comment: Invalid price
+2025-06-19 21:54:11,852 - configs - ERROR - Trade error processing signal: Order execution failed: Trade failed with code 10015, (1, 'Success') --comment: Invalid price
+2025-06-20 08:45:45,750 - configs - INFO - Processing signal: symbol='EURJPY' direction='BUY' entry=Entry(price=166.67, type='limit', validUntil='2025-06-19T10:59:59.194+01:00') stopLoss=166.47 takeProfits=[TakeProfitLevel(name='TP1', price=167.02, percentage=50.0, reason='First resistance level based on recent swing high'), TakeProfitLevel(name='TP2', price=167.37, percentage=30.0, reason='Second resistance level based on historical data'), TakeProfitLevel(name='TP3', price=167.72, percentage=20.0, reason='Third resistance level for extended gains')] confidence=75.0 reason='Uptrend confirmed on 1H timeframe with bullish pin bars and engulfing patterns on 15M. Entry triggered by bullish pin bar at support.' timestamp='2025-06-19T09:17:59.194+01:00'
+2025-06-20 08:45:45,818 - configs - WARNING - No stop loss pips provided, using default position size
+2025-06-20 08:45:46,204 - configs - INFO - Order executed successfully: OrderSendResult(retcode=10009, deal=0, order=3980182581, volume=0.01, price=0.0, bid=0.0, ask=0.0, comment='Request executed', request_id=984051719, retcode_external=0, request=TradeRequest(action=5, magic=202508, order=0, symbol='EURJPY', volume=0.01, price=166.67, stoplimit=0.0, sl=166.47, tp=167.02, deviation=35, type=2, type_filling=1, type_time=2, expiration=1750419900, comment='Trade open EURJPY', position=0, position_by=0))
+2025-06-20 08:45:46,204 - configs - INFO - Successfully processed signal: {'status': 'placed', 'order': {'retcode': 10009, 'deal': 0, 'order': 3980182581, 'volume': 0.01, 'price': 0.0, 'bid': 0.0, 'ask': 0.0, 'comment': 'Request executed', 'request_id': 984051719, 'retcode_external': 0, 'request': TradeRequest(action=5, magic=202508, order=0, symbol='EURJPY', volume=0.01, price=166.67, stoplimit=0.0, sl=166.47, tp=167.02, deviation=35, type=2, type_filling=1, type_time=2, expiration=1750419900, comment='Trade open EURJPY', position=0, position_by=0)}}
+2025-06-20 09:00:45,853 - configs - WARNING - No stop loss pips provided, using default position size
+2025-06-20 09:00:46,019 - configs - INFO - Order executed successfully: OrderSendResult(retcode=10009, deal=0, order=3980259059, volume=0.01, price=0.0, bid=0.0, ask=0.0, comment='Request executed', request_id=984051720, retcode_external=0, request=TradeRequest(action=5, magic=202508, order=0, symbol='USDJPY', volume=0.01, price=145.403, stoplimit=0.0, sl=145.203, tp=145.753, deviation=35, type=2, type_filling=1, type_time=2, expiration=1750420800, comment='Trade open USDJPY', position=0, position_by=0))
+2025-06-20 09:00:46,020 - configs - INFO - Successfully processed signal: {'status': 'placed', 'order': {'retcode': 10009, 'deal': 0, 'order': 3980259059, 'volume': 0.01, 'price': 0.0, 'bid': 0.0, 'ask': 0.0, 'comment': 'Request executed', 'request_id': 984051720, 'retcode_external': 0, 'request': TradeRequest(action=5, magic=202508, order=0, symbol='USDJPY', volume=0.01, price=145.403, stoplimit=0.0, sl=145.203, tp=145.753, deviation=35, type=2, type_filling=1, type_time=2, expiration=1750420800, comment='Trade open USDJPY', position=0, position_by=0)}}

@@ -432,16 +432,21 @@ class TradingService:
 
 
 class PositionCalculator:
-    """Calculates position sizes with risk management"""
+    """Calculates position sizes with proper risk management"""
 
     RISK_PERCENT = 0.5  # Risk 0.5% of account balance per trade
     MIN_LOT_SIZE = 0.01
     DEFAULT_LOT_SIZE = 0.01  # Fallback lot size
 
     @staticmethod
-    def calculate_position_size(symbol: str) -> float:
+    def calculate_position_size(symbol: str, stop_loss_pips: float = None) -> float:
         """
-        Calculate position size based on account balance and risk parameters
+        Calculate position size based on account balance, risk parameters, and stop loss distance
+
+        Args:
+            symbol: Trading symbol
+            stop_loss_pips: Distance from entry to stop loss in pips (optional)
+                           If not provided, will use a default risk amount
         """
         try:
             if not mt5.initialize():
@@ -458,8 +463,9 @@ class PositionCalculator:
                 logger.error(f"Invalid account balance: {account_balance}")
                 return PositionCalculator.DEFAULT_LOT_SIZE
 
-            # Calculate risk amount
+            # Calculate risk amount in dollars
             risk_amount = account_balance * (PositionCalculator.RISK_PERCENT / 100)
+            logger.debug(f"Risk amount: ${risk_amount:.2f}")
 
             # Get symbol information
             symbol_info = mt5.symbol_info(symbol)
@@ -469,16 +475,29 @@ class PositionCalculator:
                 )
                 return PositionCalculator.DEFAULT_LOT_SIZE
 
-            # Get current price and calculate pip value
-            tick = mt5.symbol_info_tick(symbol)
-            if not tick:
+            # Calculate pip value
+            contract_size = symbol_info.trade_contract_size
+            point_value = symbol_info.point
+            pip_value = (
+                (symbol_info.trade_tick_value / symbol_info.trade_tick_size)
+                * point_value
+                * 10
+            )
+
+            # If stop_loss_pips is not provided, use default risk calculation
+            if stop_loss_pips is None:
                 logger.warning(
-                    f"Could not get tick data for {symbol}, using default lot size"
+                    "No stop loss pips provided, using default position size"
                 )
                 return PositionCalculator.DEFAULT_LOT_SIZE
 
-            # Simplified position size calculation (replace with your actual risk calculation)
-            position_size = risk_amount / 1000  # Simplified $10/pip approximation
+            # Calculate position size in lots
+            risk_per_lot = stop_loss_pips * pip_value
+            if risk_per_lot <= 0:
+                logger.error(f"Invalid risk per lot calculation: {risk_per_lot}")
+                return PositionCalculator.DEFAULT_LOT_SIZE
+
+            position_size = (risk_amount / risk_per_lot) * symbol_info.volume_step
 
             # Apply broker constraints
             position_size = max(
@@ -490,7 +509,9 @@ class PositionCalculator:
             step = symbol_info.volume_step
             rounded_size = round(position_size / step) * step
 
-            logger.info(f"Calculated position size {rounded_size} for {symbol}")
+            logger.info(
+                f"Calculated position size {rounded_size} for {symbol} with {stop_loss_pips} pips SL"
+            )
             return rounded_size
 
         except Exception as e:
