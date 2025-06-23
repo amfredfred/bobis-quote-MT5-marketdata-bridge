@@ -21,7 +21,7 @@ class CandleRequest(BaseModel):
     symbols: List[str]
     timeframes: List[str]
     limit: int = 100
-    timezone: str = Config.TIMEZONE
+    timezone: str = Config.TIMEZONE()
 
     @validator("timeframes")
     def validate_timeframes(cls, v):
@@ -63,7 +63,7 @@ class TimeframeConverter:
 # ========== SERVICE ==========
 class CandleDataService:
     @staticmethod
-    def convert_to_timezone(server_timestamp: int, tz: str = Config.TIMEZONE) -> str:
+    def convert_to_timezone(server_timestamp: int, tz: str = Config.TIMEZONE()) -> str:
         """Convert FBS broker timestamp (UTC+3) to specified local timezone.
 
         Args:
@@ -97,7 +97,7 @@ class CandleDataService:
 
     @staticmethod
     def get_candles(
-        symbol: str, timeframe: str, limit: int = 100, timezone: str = Config.TIMEZONE
+        symbol: str, timeframe: str, limit: int = 100, timezone: str = Config.TIMEZONE()
     ) -> List[Candle]:
         """Get candle data from MT5"""
         try:

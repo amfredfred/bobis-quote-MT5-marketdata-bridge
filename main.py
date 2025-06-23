@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI,   Query
 from pydantic import BaseModel
 from typing import List, Optional
 import MetaTrader5 as mt5
@@ -8,14 +8,16 @@ from typing import List
 from configs import Config
 
 app = FastAPI()
-print(f"Config.PATH_TO_MT5_EXE => {Config.PATH_TO_MT5_EXE}")
-isInitialized = mt5.initialize(path=Config.PATH_TO_MT5_EXE, porable=True)
+print(f"Config.PATH_TO_MT5_EXE => {Config.MT5_ACCOUNT_PASSWORD()}")
+isInitialized = mt5.initialize(path=Config.PATH_MT5_EXEC(), porable=True)
 if not isInitialized:
     error_code, description = mt5.last_error()
     raise Exception(f"MT5 Initialization Failed: {error_code} - {description}")
 isLoggedIn = mt5.login(
-    Config.MT5_ACCOUNT_NUMBER, Config.MT5_ACCOUNT_PASSWORD, Config.MT5_ACCOUNT_SERVER
-)   
+    Config.MT5_ACCOUNT_NUMBER(),
+    Config.MT5_ACCOUNT_PASSWORD(),
+    Config.MT5_ACCOUNT_SERVER(),
+)
 if isInitialized and isLoggedIn:
     print("Logged in")
 else:
@@ -68,7 +70,7 @@ async def get_time_series_body(request: CandleRequest):
     """
     Get candle data via POST request with body
     Example: {"symbols": ["EURUSD", "GBPUSD"], "timeframes": ["1h", "4h"], "limit": 50}
-    """ 
+    """
     return CandleDataService.get_multiple_timeframes(request)
 
 

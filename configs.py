@@ -2,16 +2,33 @@ from dotenv import load_dotenv
 import os
 import logging
 
-load_dotenv()
+load_dotenv(override=True)
 
 
 class Config:
-    MAX_POSITION_PERCENT = 0.15
-    MT5_ACCOUNT_NUMBER = int(os.getenv("MT5_ACCOUNT_NUMBER"))
-    MT5_ACCOUNT_PASSWORD = os.getenv("MT5_ACCOUNT_PASSWORD")
-    MT5_ACCOUNT_SERVER = os.getenv("MT5_ACCOUNT_SERVER")
-    PATH_TO_MT5_EXE = os.getenv("PATH_TO_MT5_EXE")
-    TIMEZONE = os.getenv('TIMEZONE')
+    @staticmethod
+    def MAX_POSITION_PERCENT():
+        return 0.15
+
+    @staticmethod
+    def MT5_ACCOUNT_NUMBER():
+        return int(os.getenv("MT5_ACCOUNT_NUMBER"))
+
+    @staticmethod
+    def MT5_ACCOUNT_PASSWORD():
+        return os.getenv("MT5_ACCOUNT_PASSWORD")
+
+    @staticmethod
+    def MT5_ACCOUNT_SERVER():
+        return os.getenv("MT5_ACCOUNT_SERVER")
+
+    @staticmethod
+    def PATH_MT5_EXEC():
+        return os.getenv("PATH_MT5_EXEC")
+
+    @staticmethod
+    def TIMEZONE():
+        return os.getenv("TIMEZONE")
 
 
 # Configure logging

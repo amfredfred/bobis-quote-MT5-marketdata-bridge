@@ -21,7 +21,7 @@ def can_open_new_position(
     account_balance: float,
     open_positions_sizes: List[float],
     new_position_size: float,
-    max_percent: float = Config.MAX_POSITION_PERCENT,
+    max_percent: float = Config.MAX_POSITION_PERCENT(),
 ) -> bool:
     """
     Check if opening a new position will keep total exposure under max_percent of account.
