@@ -42,7 +42,7 @@ class PositionAnalyzer:
 
     @staticmethod
     def is_old(
-        position: mt5.TradePosition, threshold: timedelta = timedelta(hours=1)
+        position: mt5.TradePosition, threshold: timedelta = timedelta(hours=2)
     ) -> bool:
         """Check if position is older than threshold"""
         try:
@@ -341,6 +341,7 @@ class TradeValidator:
             logger.error(f"Error checking open positions for {symbol}: {str(e)}")
             raise
 
+
 class TradingService:
     """Main trading service that orchestrates all operations"""
 
@@ -357,22 +358,34 @@ class TradingService:
             try:
                 # Validate symbol and position conditions
                 TradeValidator.validate_symbol(signal.symbol)
-                if not TradeValidator.check_existing_positions(signal.symbol):  # Now checks both
+                if not TradeValidator.check_existing_positions(
+                    signal.symbol
+                ):  # Now checks both
                     msg = "Existing position or pending order blocks new trade"
                     logger.info(msg)
                     return {"status": "skipped", "message": msg}
 
                 # Prepare order parameters
                 order_type = TradingService._determine_order_type(signal)
-                volume = PositionCalculator.calculate_position_size(signal.symbol)
+                volume = PositionCalculator.calculate_position_size(
+                    signal.symbol, stop_loss_pips=float(signal.stopLoss.pips)
+                )
+
+                if signal.entry.type == "market":
+                    tick = mt5.symbol_info_tick(signal.symbol)
+                    if not tick:
+                        raise TradeError(f"Could not fetch tick for {signal.symbol}")
+                    price = tick.ask if order_type == mt5.ORDER_TYPE_BUY else tick.bid
+                else:
+                    price = float(signal.entry.price) 
 
                 # Create and execute order
                 request = TradeExecutor.create_request(
                     symbol=signal.symbol,
                     order_type=order_type,
                     volume=volume,
-                    price=signal.entry.price,
-                    sl=signal.stopLoss,
+                    price=price,
+                    sl=signal.stopLoss.price,
                     tp=signal.takeProfits[0].price if signal.takeProfits else None,
                     is_pending=signal.entry.type != "market",
                     expiration=(
@@ -432,91 +445,92 @@ class TradingService:
 
 
 class PositionCalculator:
-    """Calculates position sizes with proper risk management"""
+    """Calculates position sizes with proper risk management, considering leverage."""
 
     RISK_PERCENT = 0.5  # Risk 0.5% of account balance per trade
     MIN_LOT_SIZE = 0.01
-    DEFAULT_LOT_SIZE = 0.01  # Fallback lot size
+    DEFAULT_LOT_SIZE = 0.01
 
     @staticmethod
     def calculate_position_size(symbol: str, stop_loss_pips: float = None) -> float:
         """
-        Calculate position size based on account balance, risk parameters, and stop loss distance
+        Calculate position size based on account balance, risk, stop loss and leverage.
 
         Args:
             symbol: Trading symbol
-            stop_loss_pips: Distance from entry to stop loss in pips (optional)
-                           If not provided, will use a default risk amount
+            stop_loss_pips: SL distance in pips
+        Returns:
+            position size (float)
         """
         try:
             if not mt5.initialize():
                 raise TradeError("MT5 initialization failed")
 
-            # Get account balance
+            # Fetch account info
             account_info = mt5.account_info()
-            if not account_info:
-                logger.warning("Could not get account info, using default lot size")
+            if not account_info or account_info.balance <= 0:
+                logger.warning("Invalid account info or balance")
                 return PositionCalculator.DEFAULT_LOT_SIZE
 
-            account_balance = account_info.balance
-            if account_balance <= 0:
-                logger.error(f"Invalid account balance: {account_balance}")
-                return PositionCalculator.DEFAULT_LOT_SIZE
+            effective_balance = min(account_info.balance, account_info.equity)
+            leverage = account_info.leverage or 100  # fallback if not set
+            risk_amount = effective_balance * (PositionCalculator.RISK_PERCENT / 100)
 
-            # Calculate risk amount in dollars
-            risk_amount = account_balance * (PositionCalculator.RISK_PERCENT / 100)
-            logger.debug(f"Risk amount: ${risk_amount:.2f}")
-
-            # Get symbol information
             symbol_info = mt5.symbol_info(symbol)
             if not symbol_info:
-                logger.warning(
-                    f"Could not get symbol info for {symbol}, using default lot size"
-                )
+                logger.warning(f"Symbol {symbol} not found")
                 return PositionCalculator.DEFAULT_LOT_SIZE
 
-            # Calculate pip value
+            # Get current price (average of bid/ask)
+            tick = mt5.symbol_info_tick(symbol)
+            if not tick:
+                logger.warning(f"Could not get tick data for {symbol}")
+                return PositionCalculator.DEFAULT_LOT_SIZE
+
+            price = (tick.ask + tick.bid) / 2
             contract_size = symbol_info.trade_contract_size
-            point_value = symbol_info.point
             pip_value = (
                 (symbol_info.trade_tick_value / symbol_info.trade_tick_size)
-                * point_value
+                * symbol_info.point
                 * 10
             )
 
-            # If stop_loss_pips is not provided, use default risk calculation
-            if stop_loss_pips is None:
-                logger.warning(
-                    "No stop loss pips provided, using default position size"
-                )
+            if stop_loss_pips is None or stop_loss_pips <= 0:
+                logger.warning("Invalid stop_loss_pips, using default lot size")
                 return PositionCalculator.DEFAULT_LOT_SIZE
 
-            # Calculate position size in lots
+            # Risk per lot
             risk_per_lot = stop_loss_pips * pip_value
+
             if risk_per_lot <= 0:
-                logger.error(f"Invalid risk per lot calculation: {risk_per_lot}")
+                logger.error("Invalid risk per lot")
                 return PositionCalculator.DEFAULT_LOT_SIZE
 
-            position_size = (risk_amount / risk_per_lot) * symbol_info.volume_step
+            raw_position_size = risk_amount / risk_per_lot
 
-            # Apply broker constraints
+            # Margin required per lot
+            margin_per_lot = (contract_size * price) / leverage
+
+            # Make sure we don't exceed margin capabilities
+            max_lots_by_margin = effective_balance / margin_per_lot
+            position_size = min(raw_position_size, max_lots_by_margin)
+
+            # Clamp and round to step size
             position_size = max(
                 PositionCalculator.MIN_LOT_SIZE,
                 min(position_size, symbol_info.volume_max),
             )
-
-            # Round to acceptable step
             step = symbol_info.volume_step
             rounded_size = round(position_size / step) * step
 
             logger.info(
-                f"Calculated position size {rounded_size} for {symbol} with {stop_loss_pips} pips SL"
+                f"✅ Position size for {symbol}: {rounded_size} lots with SL {stop_loss_pips} pips effective_balance:{effective_balance}"
             )
             return rounded_size
 
         except Exception as e:
             logger.error(
-                f"Error calculating position size: {str(e)}\n{traceback.format_exc()}"
+                f"Error calculating position size: {e}\n{traceback.format_exc()}"
             )
             return PositionCalculator.DEFAULT_LOT_SIZE
 

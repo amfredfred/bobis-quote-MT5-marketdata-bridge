@@ -17,11 +17,16 @@ class EntryDict(TypedDict):
     validUntil: Optional[str]
 
 
+class StopLossDict(TypedDict):
+    price: int
+    pips: int
+    reason: str
+
 class StoredTradeSignalDict(TypedDict):
     symbol: str
     direction: str  # 'BUY' | 'SELL' | 'HOLD'
     entry: EntryDict
-    stopLoss: float
+    stopLoss: StopLossDict
     takeProfits: List[TakeProfitLevelDict]
     confidence: float
     reason: str
