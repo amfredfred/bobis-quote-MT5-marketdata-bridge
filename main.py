@@ -8,7 +8,7 @@ from typing import List
 from configs import Config
 
 app = FastAPI()
-
+print(f"Config.PATH_TO_MT5_EXE => {Config.PATH_TO_MT5_EXE}")
 isInitialized = mt5.initialize(path=Config.PATH_TO_MT5_EXE, porable=True)
 if not isInitialized:
     error_code, description = mt5.last_error()

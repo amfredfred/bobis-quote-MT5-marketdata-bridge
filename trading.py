@@ -62,8 +62,6 @@ class TradeExecutor:
     def execute_order(request: Dict[str, Any]) -> Dict[str, Any]:
         """Send order to MT5 and return result"""
         try:
-            if not mt5.initialize():
-                raise TradeExecutionError("MT5 initialization failed")
 
             result = mt5.order_send(request)
 
@@ -238,8 +236,6 @@ class TradeValidator:
     def validate_symbol(symbol: str) -> bool:
         """Check if symbol exists and is marketable"""
         try:
-            if not mt5.initialize():
-                raise TradeError("MT5 initialization failed")
 
             if not mt5.symbol_select(symbol, True):
                 raise InvalidSymbolError(f"Symbol {symbol} not available")
@@ -267,8 +263,6 @@ class TradeValidator:
         Returns True if no conflicting orders exist or if conflicting orders were successfully removed
         """
         try:
-            if not mt5.initialize():
-                raise TradeError("MT5 initialization failed")
 
             # Get all pending orders for this symbol
             orders = mt5.orders_get(symbol=symbol)
@@ -307,8 +301,6 @@ class TradeValidator:
         (This is your original check_existing_positions implementation)
         """
         try:
-            if not mt5.initialize():
-                raise TradeError("MT5 initialization failed")
 
             positions = mt5.positions_get(symbol=symbol)
             if not positions:
@@ -463,9 +455,6 @@ class PositionCalculator:
             position size (float)
         """
         try:
-            if not mt5.initialize():
-                raise TradeError("MT5 initialization failed")
-
             # Fetch account info
             account_info = mt5.account_info()
             if not account_info or account_info.balance <= 0:
