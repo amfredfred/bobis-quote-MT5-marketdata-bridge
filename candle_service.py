@@ -1,11 +1,12 @@
 import MetaTrader5 as mt5
 import pytz
-from datetime import datetime, timezone as dtz
-from typing import List
+from datetime import datetime, timezone as dtz, timedelta
+from typing import List, Optional
 from pydantic import BaseModel, validator
 from fastapi import HTTPException
 from configs import Config
 from utils import clean_symbol
+
 
 # ========== MODELS ==========
 class Candle(BaseModel):
@@ -20,7 +21,9 @@ class Candle(BaseModel):
 class CandleRequest(BaseModel):
     symbols: List[str]
     timeframes: List[str]
-    limit: int = 100
+    limit: Optional[int] = None
+    from_date: Optional[str] = None
+    to_date: Optional[str] = None
     timezone: str = Config.TIMEZONE()
 
     @validator("timeframes")
@@ -29,6 +32,18 @@ class CandleRequest(BaseModel):
         for tf in v:
             if tf.lower() not in valid_tfs:
                 raise ValueError(f"Invalid timeframe: {tf}")
+        return v
+
+    @validator("from_date", "to_date", pre=True, always=True)
+    def validate_dates(cls, v, values):
+        # If both limit and date range are provided, prioritize date range
+        if "limit" in values and values["limit"] is not None and v is not None:
+            print("Warning: Both limit and date range provided. Using date range.")
+
+        # If no date range or limit is provided, default to last 100 candles
+        if v is None and ("limit" not in values or values["limit"] is None):
+            values["limit"] = 100
+
         return v
 
 
@@ -84,7 +99,7 @@ class CandleDataService:
             ) from e
 
         # Step 1: Convert FBS UTC+3 timestamp to true UTC
-        true_utc_timestamp = server_timestamp - (3 * 3600)  # Subtract 2 hours
+        true_utc_timestamp = server_timestamp - (3 * 3600)  # Subtract 3 hours
 
         # Step 2: Create timezone-aware UTC datetime
         dt_utc = datetime.utcfromtimestamp(true_utc_timestamp).replace(tzinfo=pytz.UTC)
@@ -96,15 +111,73 @@ class CandleDataService:
         return local_dt.strftime("%Y-%m-%d %I:%M:%S %p")
 
     @staticmethod
+    def parse_date_string(date_str: str, timezone: str = Config.TIMEZONE()) -> datetime:
+        """Parse date string in various formats to datetime object"""
+        formats = [
+            "%Y-%m-%d %H:%M:%S",
+            "%Y-%m-%d %H:%M",
+            "%Y-%m-%d",
+            "%d/%m/%Y %H:%M:%S",
+            "%d/%m/%Y %H:%M",
+            "%d/%m/%Y",
+            "%m/%d/%Y %H:%M:%S",
+            "%m/%d/%Y %H:%M",
+            "%m/%d/%Y",
+        ]
+
+        for fmt in formats:
+            try:
+                dt = datetime.strptime(date_str, fmt)
+                # Localize the datetime to the specified timezone
+                tz_obj = pytz.timezone(timezone)
+                return tz_obj.localize(dt)
+            except ValueError:
+                continue
+
+        raise ValueError(f"Unable to parse date string: {date_str}")
+
+    @staticmethod
     def get_candles(
-        symbol: str, timeframe: str, limit: int = 100, timezone: str = Config.TIMEZONE()
+        symbol: str,
+        timeframe: str,
+        limit: Optional[int] = None,
+        from_date: Optional[str] = None,
+        to_date: Optional[str] = None,
+        timezone: str = Config.TIMEZONE(),
     ) -> List[Candle]:
-        """Get candle data from MT5"""
+        """Get candle data from MT5 with support for date ranges"""
         try:
             timeframe_enum = TimeframeConverter.to_mt5(timeframe)
-            rates = mt5.copy_rates_from_pos(symbol, timeframe_enum, 0, limit)
 
-            if rates is None:
+            # Convert date strings to datetime objects if provided
+            dt_from = None
+            dt_to = None
+
+            if from_date:
+                dt_from = CandleDataService.parse_date_string(from_date, timezone)
+                # Convert to UTC for MT5
+                dt_from = dt_from.astimezone(pytz.UTC)
+
+            if to_date:
+                dt_to = CandleDataService.parse_date_string(to_date, timezone)
+                # Convert to UTC for MT5
+                dt_to = dt_to.astimezone(pytz.UTC)
+            else:
+                # Default to current time if to_date not provided
+                dt_to = datetime.now(pytz.UTC)
+
+            # Fetch data based on parameters
+            if dt_from and dt_to:
+                # Get data between two dates
+                rates = mt5.copy_rates_range(symbol, timeframe_enum, dt_from, dt_to)
+            elif limit:
+                # Get data by limit (number of candles)
+                rates = mt5.copy_rates_from_pos(symbol, timeframe_enum, 0, limit)
+            else:
+                # Default to 100 candles if no parameters provided
+                rates = mt5.copy_rates_from_pos(symbol, timeframe_enum, 0, 100)
+
+            if rates is None or len(rates) == 0:
                 raise HTTPException(
                     status_code=404, detail=f"No data for {symbol} {timeframe}"
                 )
@@ -140,8 +213,11 @@ class CandleDataService:
             )
 
             return candles
-        finally:
-            pass
+        except Exception as e:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Error fetching data for {symbol} {timeframe}: {str(e)}",
+            )
 
     @staticmethod
     def get_multiple_timeframes(request: CandleRequest) -> dict:
@@ -155,6 +231,8 @@ class CandleDataService:
                         clean_symbol(symbol),
                         tf,
                         request.limit,
+                        request.from_date,
+                        request.to_date,
                         request.timezone,
                     )
                 except HTTPException as e:

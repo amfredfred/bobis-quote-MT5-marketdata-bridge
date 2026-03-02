@@ -16,9 +16,8 @@ class EntryDict(TypedDict):
     type: str  # 'limit' | 'stop' | 'market'
     validUntil: Optional[str]
 
-
 class StopLossDict(TypedDict):
-    price: int
+    price: float
     pips: int
     reason: str
 
