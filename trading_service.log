@@ -232,3 +232,14 @@ trading.TradeExecutionError: Trade failed with code 10015, (1, 'Success') --comm
 2025-06-20 09:00:45,853 - configs - WARNING - No stop loss pips provided, using default position size
 2025-06-20 09:00:46,019 - configs - INFO - Order executed successfully: OrderSendResult(retcode=10009, deal=0, order=3980259059, volume=0.01, price=0.0, bid=0.0, ask=0.0, comment='Request executed', request_id=984051720, retcode_external=0, request=TradeRequest(action=5, magic=202508, order=0, symbol='USDJPY', volume=0.01, price=145.403, stoplimit=0.0, sl=145.203, tp=145.753, deviation=35, type=2, type_filling=1, type_time=2, expiration=1750420800, comment='Trade open USDJPY', position=0, position_by=0))
 2025-06-20 09:00:46,020 - configs - INFO - Successfully processed signal: {'status': 'placed', 'order': {'retcode': 10009, 'deal': 0, 'order': 3980259059, 'volume': 0.01, 'price': 0.0, 'bid': 0.0, 'ask': 0.0, 'comment': 'Request executed', 'request_id': 984051720, 'retcode_external': 0, 'request': TradeRequest(action=5, magic=202508, order=0, symbol='USDJPY', volume=0.01, price=145.403, stoplimit=0.0, sl=145.203, tp=145.753, deviation=35, type=2, type_filling=1, type_time=2, expiration=1750420800, comment='Trade open USDJPY', position=0, position_by=0)}}
+2026-03-03 10:17:31,028 - candle_service - WARNING - Could not read terminal_info — assuming broker is UTC+0
+2026-03-03 10:20:02,091 - candle_service - ERROR - MT5 error for NAS100/1h: No data for NAS100 1h — mt5_error=(-1, 'Terminal: Call failed')
+2026-03-03 10:25:02,075 - candle_service - ERROR - MT5 error for NAS100/1h: No data for NAS100 1h — mt5_error=(-1, 'Terminal: Call failed')
+2026-03-03 10:28:07,064 - candle_service - INFO - Broker UTC offset resolved: UTC+0
+2026-03-03 10:30:02,096 - candle_service - ERROR - MT5 error for NAS100/1h: No data for NAS100 1h — mt5_error=(-1, 'Terminal: Call failed')
+2026-03-03 10:30:08,290 - candle_service - INFO - Broker UTC offset resolved: UTC+5
+2026-03-03 10:30:54,508 - candle_service - INFO - Broker UTC offset resolved: UTC+0
+2026-03-03 10:32:22,044 - candle_service - INFO - Broker UTC offset derived: UTC+2  (broker=1772537541, utc=1772530342)
+2026-03-03 10:35:02,081 - candle_service - ERROR - MT5 error for NAS100/1h: No data for NAS100 1h — mt5_error=(-1, 'Terminal: Call failed')
+2026-03-03 10:39:24,625 - candle_service - INFO - Broker UTC offset derived: UTC+2  (broker=1772537964, utc=1772530764)
+2026-03-03 10:40:02,050 - candle_service - ERROR - MT5 error for NAS100/1h: No data for NAS100 1h — mt5_error=(-1, 'Terminal: Call failed')

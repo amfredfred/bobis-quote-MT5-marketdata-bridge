@@ -1,14 +1,67 @@
+import logging
 import MetaTrader5 as mt5
 import pytz
-from datetime import datetime, timezone as dtz, timedelta
+from datetime import datetime
 from typing import List, Optional
 from pydantic import BaseModel, validator
 from fastapi import HTTPException
 from configs import Config
 from utils import clean_symbol
+from datetime import timedelta
 
+logger = logging.getLogger(__name__)
+
+# ── Broker UTC offset — resolved lazily after MT5 login ──────────────────────
+# MT5 rate["time"] is in broker server time (e.g. UTC+3 for FBS).
+# terminal_info().trade_server_timezone gives the offset so we can convert
+# to true UTC without hardcoding. Resolution is deferred until the first
+# candle fetch so that mt5.initialize() + mt5.login() have already run.
+
+_BROKER_UTC_OFFSET: Optional[int] = None
+
+
+def get_broker_utc_offset() -> int:
+    """
+    Derive broker UTC offset by comparing MT5 server time against true UTC.
+    Works regardless of MT5 build or broker — no reliance on terminal_info fields.
+    """
+    global _BROKER_UTC_OFFSET
+    if _BROKER_UTC_OFFSET is not None:
+        return _BROKER_UTC_OFFSET
+
+    server_time = mt5.symbol_info_tick("EURUSD")
+    if server_time is None:
+        # Fallback: try any available symbol
+        symbols = mt5.symbols_get()
+        for s in symbols or []:
+            tick = mt5.symbol_info_tick(s.name)
+            if tick:
+                server_time = tick
+                break
+
+    if server_time is None:
+        logger.warning("Could not get tick time — assuming broker UTC+0")
+        return 0
+
+    # tick.time is broker server time (Unix seconds)
+    # datetime.now(UTC) is true UTC
+    true_utc_now = int(datetime.now(pytz.UTC).timestamp())
+    broker_now = server_time.time
+
+    # Round to nearest hour
+    offset = round((broker_now - true_utc_now) / 3600)
+    _BROKER_UTC_OFFSET = offset
+    logger.info(
+        "Broker UTC offset derived: UTC+%d  (broker=%d, utc=%d)",
+        offset,
+        broker_now,
+        true_utc_now,
+    )
+    return _BROKER_UTC_OFFSET
 
 # ========== MODELS ==========
+
+
 class Candle(BaseModel):
     timestamp: str
     open: float
@@ -36,22 +89,20 @@ class CandleRequest(BaseModel):
 
     @validator("from_date", "to_date", pre=True, always=True)
     def validate_dates(cls, v, values):
-        # If both limit and date range are provided, prioritize date range
         if "limit" in values and values["limit"] is not None and v is not None:
-            print("Warning: Both limit and date range provided. Using date range.")
-
-        # If no date range or limit is provided, default to last 100 candles
+            logger.warning("Both limit and date range provided — using date range.")
         if v is None and ("limit" not in values or values["limit"] is None):
             values["limit"] = 100
-
         return v
 
 
 # ========== UTILITIES ==========
+
+
 class TimeframeConverter:
     @staticmethod
     def to_mt5(timeframe: str) -> int:
-        """Convert trader-friendly timeframe to MT5 enum"""
+        """Convert trader-friendly timeframe string to MT5 enum."""
         timeframe = timeframe.lower()
         if timeframe.endswith("m"):
             minutes = int(timeframe[:-1])
@@ -63,9 +114,10 @@ class TimeframeConverter:
             }.get(minutes, mt5.TIMEFRAME_M1)
         elif timeframe.endswith("h"):
             hours = int(timeframe[:-1])
-            return {1: mt5.TIMEFRAME_H1, 4: mt5.TIMEFRAME_H4}.get(
-                hours, mt5.TIMEFRAME_H1
-            )
+            return {
+                1: mt5.TIMEFRAME_H1,
+                4: mt5.TIMEFRAME_H4,
+            }.get(hours, mt5.TIMEFRAME_H1)
         elif timeframe == "d1":
             return mt5.TIMEFRAME_D1
         elif timeframe == "w1":
@@ -76,20 +128,35 @@ class TimeframeConverter:
 
 
 # ========== SERVICE ==========
+
+
 class CandleDataService:
+
+    @staticmethod
+    def broker_ts_to_utc(server_timestamp: int) -> datetime:
+        """
+        Convert a raw MT5 rate["time"] value to a true UTC datetime.
+
+        MT5 returns timestamps in broker server time (e.g. UTC+3 for FBS).
+        We subtract the broker's UTC offset — resolved lazily via
+        terminal_info().trade_server_timezone — to get true UTC.
+        """
+        offset = get_broker_utc_offset()
+        true_utc = server_timestamp - (offset * 3600)
+        return datetime.utcfromtimestamp(true_utc).replace(tzinfo=pytz.UTC)
+
     @staticmethod
     def convert_to_timezone(server_timestamp: int, tz: str = Config.TIMEZONE()) -> str:
-        """Convert FBS broker timestamp (UTC+3) to specified local timezone.
+        """
+        Convert a raw MT5 broker timestamp to a formatted string in the
+        requested timezone.
 
         Args:
-            server_timestamp: FBS server timestamp (UTC+3)
-            tz: Target timezone (e.g., 'Africa/Lagos')
+            server_timestamp: raw MT5 rate["time"] (broker server time)
+            tz: target timezone string e.g. "Africa/Lagos"
 
         Returns:
-            Formatted datetime string in target timezone (12-hour with AM/PM)
-
-        Raises:
-            ValueError: If invalid timezone provided
+            Formatted datetime string: "YYYY-MM-DD HH:MM:SS AM/PM"
         """
         try:
             tz_obj = pytz.timezone(tz)
@@ -98,21 +165,13 @@ class CandleDataService:
                 f"Invalid timezone: '{tz}'. Use format like 'Africa/Lagos'"
             ) from e
 
-        # Step 1: Convert FBS UTC+3 timestamp to true UTC
-        true_utc_timestamp = server_timestamp - (3 * 3600)  # Subtract 3 hours
-
-        # Step 2: Create timezone-aware UTC datetime
-        dt_utc = datetime.utcfromtimestamp(true_utc_timestamp).replace(tzinfo=pytz.UTC)
-
-        # Step 3: Convert to target timezone
+        dt_utc = CandleDataService.broker_ts_to_utc(server_timestamp)
         local_dt = dt_utc.astimezone(tz_obj)
-
-        # Step 4: Format as 12-hour with AM/PM
         return local_dt.strftime("%Y-%m-%d %I:%M:%S %p")
 
     @staticmethod
     def parse_date_string(date_str: str, timezone: str = Config.TIMEZONE()) -> datetime:
-        """Parse date string in various formats to datetime object"""
+        """Parse a date string in various formats to a timezone-aware datetime."""
         formats = [
             "%Y-%m-%d %H:%M:%S",
             "%Y-%m-%d %H:%M",
@@ -124,17 +183,14 @@ class CandleDataService:
             "%m/%d/%Y %H:%M",
             "%m/%d/%Y",
         ]
-
         for fmt in formats:
             try:
                 dt = datetime.strptime(date_str, fmt)
-                # Localize the datetime to the specified timezone
                 tz_obj = pytz.timezone(timezone)
                 return tz_obj.localize(dt)
             except ValueError:
                 continue
-
-        raise ValueError(f"Unable to parse date string: {date_str}")
+        raise ValueError(f"Unable to parse date string: {date_str!r}")
 
     @staticmethod
     def get_candles(
@@ -145,86 +201,82 @@ class CandleDataService:
         to_date: Optional[str] = None,
         timezone: str = Config.TIMEZONE(),
     ) -> List[Candle]:
-        """Get candle data from MT5 with support for date ranges"""
+        """Fetch candle data from MT5 with support for date ranges or limit."""
         try:
             timeframe_enum = TimeframeConverter.to_mt5(timeframe)
 
-            # Convert date strings to datetime objects if provided
-            dt_from = None
-            dt_to = None
+            dt_from: Optional[datetime] = None
+            dt_to: Optional[datetime] = None
 
-            if from_date:
+            if dt_from:
                 dt_from = CandleDataService.parse_date_string(from_date, timezone)
-                # Convert to UTC for MT5
                 dt_from = dt_from.astimezone(pytz.UTC)
+                # Shift to broker time — MT5 copy_rates_range expects broker server time
+                dt_from = dt_from + timedelta(hours=get_broker_utc_offset())
 
             if to_date:
                 dt_to = CandleDataService.parse_date_string(to_date, timezone)
-                # Convert to UTC for MT5
                 dt_to = dt_to.astimezone(pytz.UTC)
+                dt_to = dt_to + timedelta(hours=get_broker_utc_offset())
             else:
-                # Default to current time if to_date not provided
-                dt_to = datetime.now(pytz.UTC)
+                # No to_date — use current broker time
+                dt_to = datetime.now(pytz.UTC) + timedelta(hours=get_broker_utc_offset())
 
-            # Fetch data based on parameters
             if dt_from and dt_to:
-                # Get data between two dates
                 rates = mt5.copy_rates_range(symbol, timeframe_enum, dt_from, dt_to)
             elif limit:
-                # Get data by limit (number of candles)
                 rates = mt5.copy_rates_from_pos(symbol, timeframe_enum, 0, limit)
             else:
-                # Default to 100 candles if no parameters provided
                 rates = mt5.copy_rates_from_pos(symbol, timeframe_enum, 0, 100)
 
             if rates is None or len(rates) == 0:
                 raise HTTPException(
-                    status_code=404, detail=f"No data for {symbol} {timeframe}"
+                    status_code=404,
+                    detail=f"No data for {symbol} {timeframe}",
                 )
 
-            candles = []
+            candles: List[Candle] = []
             for rate in rates:
-                # Check which volume field exists
                 volume = (
                     rate["real_volume"]
                     if "real_volume" in rate.dtype.names
                     else rate["tick_volume"]
                 )
-
                 timestamp = CandleDataService.convert_to_timezone(
                     rate["time"], timezone
                 )
-
                 candles.append(
                     Candle(
                         timestamp=timestamp,
-                        open=rate["open"],
-                        high=rate["high"],
-                        low=rate["low"],
-                        close=rate["close"],
-                        volume=volume,
+                        open=float(rate["open"]),
+                        high=float(rate["high"]),
+                        low=float(rate["low"]),
+                        close=float(rate["close"]),
+                        volume=float(volume),
                     )
                 )
 
-            # Sort candles by timestamp in descending order (newest first)
+            # Sort ascending (oldest → newest)
             candles.sort(
-                key=lambda x: datetime.strptime(x.timestamp, "%Y-%m-%d %I:%M:%S %p"),
-                reverse=True,
+                key=lambda x: datetime.strptime(x.timestamp, "%Y-%m-%d %I:%M:%S %p")
             )
 
             return candles
+
+        except HTTPException:
+            raise
         except Exception as e:
             raise HTTPException(
                 status_code=500,
-                detail=f"Error fetching data for {symbol} {timeframe}: {str(e)}",
+                detail=f"Error fetching data for {symbol} {timeframe}: {e}",
             )
 
     @staticmethod
     def get_multiple_timeframes(request: CandleRequest) -> dict:
-        """Get candle data for multiple symbols and timeframes"""
-        result = {}
+        """Fetch candle data for multiple symbols and timeframes."""
+        result: dict = {}
         for symbol in request.symbols:
-            symbol_data = {}
+            symbol_data: dict = {}
             for tf in request.timeframes:
                 try:
                     symbol_data[tf] = CandleDataService.get_candles(
@@ -236,7 +288,13 @@ class CandleDataService:
                         request.timezone,
                     )
                 except HTTPException as e:
-                    print(mt5.last_error())
+                    logger.error(
+                        "MT5 error for %s/%s: %s — mt5_error=%s",
+                        symbol,
+                        tf,
+                        e.detail,
+                        mt5.last_error(),
+                    )
                     symbol_data[tf] = {"error": str(e.detail)}
             result[symbol] = symbol_data
         return result

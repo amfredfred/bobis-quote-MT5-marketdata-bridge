@@ -19,6 +19,8 @@ isLoggedIn = mt5.login(
 )
 if isInitialized and isLoggedIn:
     print("Logged in")
+    from candle_service import get_broker_utc_offset
+    get_broker_utc_offset()  # ← resolves and caches UTC offset now while terminal is ready
 else:
     error_code, description = mt5.last_error()
     raise Exception(f"MT5 login Failed!: {error_code} - {description}")
