@@ -1,13 +1,12 @@
 import logging
 import MetaTrader5 as mt5
 import pytz
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import List, Optional
 from pydantic import BaseModel, validator
 from fastapi import HTTPException
 from configs import Config
 from utils import clean_symbol
-from datetime import timedelta
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +48,7 @@ def get_broker_utc_offset() -> int:
 
 
 class Candle(BaseModel):
-    timestamp: str
+    timestamp: int  # UTC milliseconds
     open: float
     high: float
     low: float
@@ -110,23 +109,11 @@ class TimeframeConverter:
 class CandleDataService:
 
     @staticmethod
-    def broker_ts_to_utc(server_timestamp: int) -> datetime:
+    def broker_ts_to_utc_ms(server_timestamp: int) -> int:
+        """Convert a broker server timestamp to UTC milliseconds."""
         offset = get_broker_utc_offset()
-        true_utc = server_timestamp - (offset * 3600)
-        return datetime.utcfromtimestamp(true_utc).replace(tzinfo=pytz.UTC)
-
-    @staticmethod
-    def convert_to_timezone(server_timestamp: int, tz: str = Config.TIMEZONE()) -> str:
-        try:
-            tz_obj = pytz.timezone(tz)
-        except pytz.exceptions.UnknownTimeZoneError as e:
-            raise ValueError(
-                f"Invalid timezone: '{tz}'. Use format like 'Africa/Lagos'"
-            ) from e
-
-        dt_utc = CandleDataService.broker_ts_to_utc(server_timestamp)
-        local_dt = dt_utc.astimezone(tz_obj)
-        return local_dt.strftime("%Y-%m-%d %I:%M:%S %p")
+        utc_sec = server_timestamp - (offset * 3600)
+        return utc_sec * 1000
 
     @staticmethod
     def parse_date_string(date_str: str, timezone: str = Config.TIMEZONE()) -> datetime:
@@ -168,17 +155,16 @@ class CandleDataService:
             if from_date:
                 dt_from = CandleDataService.parse_date_string(from_date, timezone)
                 dt_from = dt_from.astimezone(pytz.UTC)
-                dt_from = dt_from + timedelta(hours=get_broker_utc_offset())
+                dt_from += timedelta(hours=get_broker_utc_offset())
 
             if to_date:
                 dt_to = CandleDataService.parse_date_string(to_date, timezone)
                 dt_to = dt_to.astimezone(pytz.UTC)
-                dt_to = dt_to + timedelta(hours=get_broker_utc_offset())
+                dt_to += timedelta(hours=get_broker_utc_offset())
 
             if dt_from and dt_to:
                 rates = mt5.copy_rates_range(symbol, timeframe_enum, dt_from, dt_to)
             elif dt_from:
-                # open-ended: from a date up to now
                 dt_to = datetime.now(pytz.UTC) + timedelta(
                     hours=get_broker_utc_offset()
                 )
@@ -204,12 +190,9 @@ class CandleDataService:
                     if "real_volume" in rate.dtype.names
                     else rate["tick_volume"]
                 )
-                timestamp = CandleDataService.convert_to_timezone(
-                    rate["time"], timezone
-                )
                 candles.append(
                     Candle(
-                        timestamp=timestamp,
+                        timestamp=CandleDataService.broker_ts_to_utc_ms(rate["time"]),
                         open=float(rate["open"]),
                         high=float(rate["high"]),
                         low=float(rate["low"]),
@@ -218,10 +201,7 @@ class CandleDataService:
                     )
                 )
 
-            candles.sort(
-                key=lambda x: datetime.strptime(x.timestamp, "%Y-%m-%d %I:%M:%S %p")
-            )
-
+            candles.sort(key=lambda c: c.timestamp)
             return candles
 
         except HTTPException:

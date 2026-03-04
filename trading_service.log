@@ -249,3 +249,7 @@ trading.TradeExecutionError: Trade failed with code 10015, (1, 'Success') --comm
 2026-03-03 20:45:00,427 - candle_service - ERROR - MT5 error for EUR/USD/5m: No data for EURUSD 5m — mt5_error=(-2, 'Invalid arguments')
 2026-03-03 20:46:48,261 - candle_service - INFO - Broker UTC offset derived: UTC+2  (broker=1772574408, utc=1772567208)
 2026-03-03 20:59:08,341 - candle_service - INFO - Broker UTC offset derived: UTC+2  (broker=1772575148, utc=1772567948)
+2026-03-04 08:48:29,796 - candle_service - ERROR - MT5 error for ETH/USDT/1h: No data for ETHUSDT 1h — mt5_error=(-1, 'Terminal: Call failed')
+2026-03-04 08:49:07,856 - candle_service - ERROR - MT5 error for Uk100/1h: No data for Uk100 1h — mt5_error=(-1, 'Terminal: Call failed')
+2026-03-04 08:49:21,655 - candle_service - ERROR - MT5 error for Uk100/1h: No data for Uk100 1h — mt5_error=(-1, 'Terminal: Call failed')
+2026-03-04 10:50:05,864 - candle_service - INFO - Broker UTC offset derived: UTC+2  (broker=1772625005, utc=1772617805)
