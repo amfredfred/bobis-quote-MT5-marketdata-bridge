@@ -98,7 +98,7 @@ async def get_time_series_query(
     to_date: Optional[str] = Query(
         None, description="End date (YYYY-MM-DD or YYYY-MM-DD HH:MM:SS)"
     ),
-    timezone: str = Query("Africa/Lagos", description="Timezone for timestamps"),
+    timezone: str = Query("UTC", description="Timezone for timestamps"),
 ):
     """
     Get candle data via GET request with query parameters

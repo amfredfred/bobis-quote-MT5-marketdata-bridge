@@ -253,3 +253,26 @@ trading.TradeExecutionError: Trade failed with code 10015, (1, 'Success') --comm
 2026-03-04 08:49:07,856 - candle_service - ERROR - MT5 error for Uk100/1h: No data for Uk100 1h — mt5_error=(-1, 'Terminal: Call failed')
 2026-03-04 08:49:21,655 - candle_service - ERROR - MT5 error for Uk100/1h: No data for Uk100 1h — mt5_error=(-1, 'Terminal: Call failed')
 2026-03-04 10:50:05,864 - candle_service - INFO - Broker UTC offset derived: UTC+2  (broker=1772625005, utc=1772617805)
+2026-03-05 20:53:01,930 - candle_service - ERROR - MT5 error for Uk100/1h: No data for Uk100 1h — mt5_error=(-1, 'Terminal: Call failed')
+2026-03-06 09:31:15,728 - asyncio - ERROR - Task exception was never retrieved
+future: <Task finished name='Task-28059' coro=<IocpProactor.accept.<locals>.accept_coro() done, defined at C:\Python312\Lib\asyncio\windows_events.py:563> exception=OSError(22, 'The specified network name is no longer available', None, 64, None)>
+Traceback (most recent call last):
+  File "C:\Python312\Lib\asyncio\windows_events.py", line 566, in accept_coro
+    await future
+  File "C:\Python312\Lib\asyncio\windows_events.py", line 803, in _poll
+    value = callback(transferred, key, ov)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python312\Lib\asyncio\windows_events.py", line 555, in finish_accept
+    ov.getresult()
+OSError: [WinError 64] The specified network name is no longer available
+2026-03-06 09:31:15,775 - asyncio - ERROR - Accept failed on a socket
+socket: <asyncio.TransportSocket fd=772, family=2, type=1, proto=6, laddr=('0.0.0.0', 8000)>
+Traceback (most recent call last):
+  File "C:\Python312\Lib\asyncio\proactor_events.py", line 846, in loop
+    conn, addr = f.result()
+                 ^^^^^^^^^^
+OSError: [WinError 64] The specified network name is no longer available
+2026-03-06 10:02:03,344 - candle_service - INFO - Broker UTC offset derived: UTC+2  (broker=1772794923, utc=1772787723)
+2026-03-06 16:21:44,317 - candle_service - INFO - Broker UTC offset derived: UTC+-5  (broker=1772790791, utc=1772810504)
+2026-03-06 21:55:32,979 - candle_service - INFO - Broker UTC offset derived: UTC+2  (broker=1772837732, utc=1772830532)
+2026-03-07 16:49:43,068 - candle_service - INFO - Broker UTC offset derived: UTC+-16  (broker=1772841480, utc=1772898583)
