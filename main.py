@@ -2,7 +2,6 @@ from fastapi import FastAPI, Query
 from pydantic import BaseModel
 from typing import List, Optional
 import MetaTrader5 as mt5
-from trading import TradingService
 from candle_service import CandleDataService, Candle, CandleRequest
 from typing import List
 from configs import Config
@@ -54,15 +53,6 @@ class TradeSignal(BaseModel):
     confidence: float
     reason: str
     timestamp: str
-
-
-@app.post("/trade")
-async def execute_trade(signal: TradeSignal):
-    """Endpoint to execute trades"""
-    try:
-        return TradingService.process_signal(signal)
-    finally:
-        print("What went wrong")
 
 
 @app.get("/health")

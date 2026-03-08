@@ -32,7 +32,8 @@ def get_broker_utc_offset() -> int:
     broker_ts = tick.time_msc / 1000.0 if tick.time_msc else float(tick.time)
     raw_offset = (broker_ts - true_utc_now) / 3600
     _BROKER_UTC_OFFSET = round(raw_offset)
-
+    logger.info("raw broker_ts=%.3f, true_utc=%.3f, raw_offset=%.4f, rounded=%d",
+                broker_ts, true_utc_now, raw_offset, _BROKER_UTC_OFFSET)
     logger.info(
         "Broker UTC offset derived: UTC+%d (raw=%.4f)",
         _BROKER_UTC_OFFSET,
@@ -141,7 +142,7 @@ class CandleDataService:
         try:
             timeframe_enum = TimeframeConverter.to_mt5(timeframe)
             offset = get_broker_utc_offset()
-
+     
             dt_from: Optional[datetime] = None
             dt_to: Optional[datetime] = None
 
@@ -151,12 +152,12 @@ class CandleDataService:
 
             if to_date:
                 dt_to = CandleDataService.parse_date_string(to_date, tz_name)
-                dt_to += timedelta(hours=offset)
+                dt_to += timedelta(days=1)
 
             if dt_from and dt_to:
                 rates = mt5.copy_rates_range(symbol, timeframe_enum, dt_from, dt_to)
             elif dt_from:
-                dt_to = datetime.now(timezone.utc) + timedelta(hours=offset)
+                dt_to = datetime.now(timezone.utc) + timedelta(days=1)
                 rates = mt5.copy_rates_range(symbol, timeframe_enum, dt_from, dt_to)
             elif limit:
                 rates = mt5.copy_rates_from_pos(symbol, timeframe_enum, 0, limit)
