@@ -1,7 +1,6 @@
 import logging
 import MetaTrader5 as mt5
-import pytz
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 from pydantic import BaseModel, validator
 from fastapi import HTTPException
@@ -11,35 +10,33 @@ from utils import clean_symbol
 logger = logging.getLogger(__name__)
 
 _BROKER_UTC_OFFSET: Optional[int] = None
-
+_OFFSET_SYMBOLS = ["BTCUSD", "ETHUSD", "BTCUSDT", "ETHUSDT"]
 
 def get_broker_utc_offset() -> int:
     global _BROKER_UTC_OFFSET
     if _BROKER_UTC_OFFSET is not None:
         return _BROKER_UTC_OFFSET
 
-    server_time = mt5.symbol_info_tick("EURUSD")
-    if server_time is None:
-        symbols = mt5.symbols_get()
-        for s in symbols or []:
-            tick = mt5.symbol_info_tick(s.name)
-            if tick:
-                server_time = tick
-                break
+    tick = None
+    for symbol in _OFFSET_SYMBOLS:
+        t = mt5.symbol_info_tick(symbol)
+        if t is not None:
+            tick = t
+            break
 
-    if server_time is None:
-        logger.warning("Could not get tick time — assuming broker UTC+0")
+    if tick is None:
+        logger.warning("No crypto tick available — assuming broker UTC+0")
         return 0
 
-    true_utc_now = int(datetime.now(pytz.UTC).timestamp())
-    broker_now = server_time.time
-    offset = round((broker_now - true_utc_now) / 3600)
-    _BROKER_UTC_OFFSET = offset
+    true_utc_now = datetime.now(timezone.utc).timestamp()
+    broker_ts = tick.time_msc / 1000.0 if tick.time_msc else float(tick.time)
+    raw_offset = (broker_ts - true_utc_now) / 3600
+    _BROKER_UTC_OFFSET = round(raw_offset)
+
     logger.info(
-        "Broker UTC offset derived: UTC+%d  (broker=%d, utc=%d)",
-        offset,
-        broker_now,
-        true_utc_now,
+        "Broker UTC offset derived: UTC+%d (raw=%.4f)",
+        _BROKER_UTC_OFFSET,
+        raw_offset,
     )
     return _BROKER_UTC_OFFSET
 
@@ -77,30 +74,24 @@ class CandleRequest(BaseModel):
 
 
 class TimeframeConverter:
-    @staticmethod
-    def to_mt5(timeframe: str) -> int:
-        timeframe = timeframe.lower()
-        if timeframe.endswith("m"):
-            minutes = int(timeframe[:-1])
-            return {
-                1: mt5.TIMEFRAME_M1,
-                5: mt5.TIMEFRAME_M5,
-                15: mt5.TIMEFRAME_M15,
-                30: mt5.TIMEFRAME_M30,
-            }.get(minutes, mt5.TIMEFRAME_M1)
-        elif timeframe.endswith("h"):
-            hours = int(timeframe[:-1])
-            return {
-                1: mt5.TIMEFRAME_H1,
-                4: mt5.TIMEFRAME_H4,
-            }.get(hours, mt5.TIMEFRAME_H1)
-        elif timeframe == "d1":
-            return mt5.TIMEFRAME_D1
-        elif timeframe == "w1":
-            return mt5.TIMEFRAME_W1
-        elif timeframe == "mn1":
-            return mt5.TIMEFRAME_MN1
-        raise ValueError(f"Unsupported timeframe: {timeframe}")
+    _MAP = {
+        "1m": mt5.TIMEFRAME_M1,
+        "5m": mt5.TIMEFRAME_M5,
+        "15m": mt5.TIMEFRAME_M15,
+        "30m": mt5.TIMEFRAME_M30,
+        "1h": mt5.TIMEFRAME_H1,
+        "4h": mt5.TIMEFRAME_H4,
+        "d1": mt5.TIMEFRAME_D1,
+        "w1": mt5.TIMEFRAME_W1,
+        "mn1": mt5.TIMEFRAME_MN1,
+    }
+
+    @classmethod
+    def to_mt5(cls, timeframe: str) -> int:
+        key = timeframe.lower()
+        if key not in cls._MAP:
+            raise ValueError(f"Unsupported timeframe: {timeframe}")
+        return cls._MAP[key]
 
 
 # ========== SERVICE ==========
@@ -110,13 +101,12 @@ class CandleDataService:
 
     @staticmethod
     def broker_ts_to_utc_ms(server_timestamp: int) -> int:
-        """Convert a broker server timestamp to UTC milliseconds."""
         offset = get_broker_utc_offset()
         utc_sec = server_timestamp - (offset * 3600)
         return utc_sec * 1000
 
     @staticmethod
-    def parse_date_string(date_str: str, timezone: str = Config.TIMEZONE()) -> datetime:
+    def parse_date_string(date_str: str, tz_name: str = Config.TIMEZONE()) -> datetime:
         formats = [
             "%Y-%m-%d %H:%M:%S",
             "%Y-%m-%d %H:%M",
@@ -128,11 +118,13 @@ class CandleDataService:
             "%m/%d/%Y %H:%M",
             "%m/%d/%Y",
         ]
+        import zoneinfo
+
+        tz = zoneinfo.ZoneInfo(tz_name)
         for fmt in formats:
             try:
                 dt = datetime.strptime(date_str, fmt)
-                tz_obj = pytz.timezone(timezone)
-                return tz_obj.localize(dt)
+                return dt.replace(tzinfo=tz).astimezone(timezone.utc)
             except ValueError:
                 continue
         raise ValueError(f"Unable to parse date string: {date_str!r}")
@@ -144,30 +136,27 @@ class CandleDataService:
         limit: Optional[int] = None,
         from_date: Optional[str] = None,
         to_date: Optional[str] = None,
-        timezone: str = Config.TIMEZONE(),
+        tz_name: str = Config.TIMEZONE(),
     ) -> List[Candle]:
         try:
             timeframe_enum = TimeframeConverter.to_mt5(timeframe)
+            offset = get_broker_utc_offset()
 
             dt_from: Optional[datetime] = None
             dt_to: Optional[datetime] = None
 
             if from_date:
-                dt_from = CandleDataService.parse_date_string(from_date, timezone)
-                dt_from = dt_from.astimezone(pytz.UTC)
-                dt_from += timedelta(hours=get_broker_utc_offset())
+                dt_from = CandleDataService.parse_date_string(from_date, tz_name)
+                dt_from += timedelta(hours=offset)
 
             if to_date:
-                dt_to = CandleDataService.parse_date_string(to_date, timezone)
-                dt_to = dt_to.astimezone(pytz.UTC)
-                dt_to += timedelta(hours=get_broker_utc_offset())
+                dt_to = CandleDataService.parse_date_string(to_date, tz_name)
+                dt_to += timedelta(hours=offset)
 
             if dt_from and dt_to:
                 rates = mt5.copy_rates_range(symbol, timeframe_enum, dt_from, dt_to)
             elif dt_from:
-                dt_to = datetime.now(pytz.UTC) + timedelta(
-                    hours=get_broker_utc_offset()
-                )
+                dt_to = datetime.now(timezone.utc) + timedelta(hours=offset)
                 rates = mt5.copy_rates_range(symbol, timeframe_enum, dt_from, dt_to)
             elif limit:
                 rates = mt5.copy_rates_from_pos(symbol, timeframe_enum, 0, limit)
@@ -179,8 +168,7 @@ class CandleDataService:
 
             if rates is None or len(rates) == 0:
                 raise HTTPException(
-                    status_code=404,
-                    detail=f"No data for {symbol} {timeframe}",
+                    status_code=404, detail=f"No data for {symbol} {timeframe}"
                 )
 
             candles: List[Candle] = []
