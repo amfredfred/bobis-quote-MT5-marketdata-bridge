@@ -1,73 +1,41 @@
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, Query
-from pydantic import BaseModel
-from typing import List, Optional
+from typing import Optional
 import MetaTrader5 as mt5
-from candle_service import CandleDataService, Candle, CandleRequest
-from typing import List
+from candle_service import CandleDataService, CandleRequest, get_broker_utc_offset
 from configs import Config
 
-app = FastAPI()
-isInitialized = mt5.initialize(path=Config.PATH_MT5_EXEC())
-if not isInitialized:
-    error_code, description = mt5.last_error()
-    raise Exception(f"MT5 Initialization Failed: {error_code} - {description}")
-isLoggedIn = mt5.login(
-    Config.MT5_ACCOUNT_NUMBER(),
-    Config.MT5_ACCOUNT_PASSWORD(),
-    Config.MT5_ACCOUNT_SERVER(),
-)
-if isInitialized and isLoggedIn:
-    print("Logged in")
-    from candle_service import get_broker_utc_offset
-    get_broker_utc_offset()  # ← resolves and caches UTC offset now while terminal is ready
-else:
-    error_code, description = mt5.last_error()
-    raise Exception(f"MT5 login Failed!: {error_code} - {description}")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    if not mt5.initialize(path=Config.PATH_MT5_EXEC):
+        code, desc = mt5.last_error()
+        raise RuntimeError(f"MT5 init failed: {code} - {desc}")
+
+    if not mt5.login(
+        Config.MT5_ACCOUNT_NUMBER,
+        Config.MT5_ACCOUNT_PASSWORD,
+        Config.MT5_ACCOUNT_SERVER,
+    ):
+        code, desc = mt5.last_error()
+        raise RuntimeError(f"MT5 login failed: {code} - {desc}")
+
+    print("MT5 logged in")
+    get_broker_utc_offset()
+    yield
+    mt5.shutdown()
 
 
-class TakeProfitLevel(BaseModel):
-    name: str  # TP1, TP2, etc.
-    price: float
-    percentage: Optional[float] = None
-    reason: Optional[str] = None
-
-
-class Entry(BaseModel):
-    price: float
-    type: str  # "limit", "stop", "market"
-    validUntil: Optional[str] = None
-
-
-class StopLossDict(BaseModel):
-    price: float
-    pips: int
-    reason: str
-
-
-class TradeSignal(BaseModel):
-    symbol: str
-    direction: str  # "BUY", "SELL", "HOLD"
-    entry: Entry
-    stopLoss: StopLossDict
-    takeProfits: List[TakeProfitLevel]
-    confidence: float
-    reason: str
-    timestamp: str
+app = FastAPI(lifespan=lifespan)
 
 
 @app.get("/health")
 async def health_check():
-    """Health check endpoint"""
     return {"status": "healthy"}
 
 
-# ========== API ENDPOINTS ==========
 @app.post("/time-series", response_model=dict)
 async def get_time_series_body(request: CandleRequest):
-    """
-    Get candle data via POST request with body
-    Example: {"symbols": ["EURUSD", "GBPUSD"], "timeframes": ["1h", "4h"], "limit": 50}
-    """
     return CandleDataService.get_multiple_timeframes(request)
 
 
@@ -90,11 +58,6 @@ async def get_time_series_query(
     ),
     timezone: str = Query("UTC", description="Timezone for timestamps"),
 ):
-    """
-    Get candle data via GET request with query parameters
-    Example: /time-series?symbols=EURUSD,GBPUSD&timeframes=1h,4h&limit=50
-    Example with date range: /time-series?symbols=EURUSD&timeframes=1h&from_date=2023-10-01&to_date=2023-10-15
-    """
     return CandleDataService.get_multiple_timeframes(
         CandleRequest(
             symbols=[s.strip() for s in symbols.split(",")],
@@ -107,7 +70,6 @@ async def get_time_series_query(
     )
 
 
-# ========== MAIN ==========
 if __name__ == "__main__":
     import uvicorn
 
