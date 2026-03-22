@@ -8,7 +8,12 @@ from configs import Config
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    if not mt5.initialize(path=Config.PATH_MT5_EXEC):
+    if not mt5.initialize(
+        path=Config.PATH_MT5_EXEC,
+        password=Config.MT5_ACCOUNT_PASSWORD,
+        login=Config.MT5_ACCOUNT_NUMBER,
+        server=Config.MT5_ACCOUNT_SERVER,
+    ):
         code, desc = mt5.last_error()
         raise RuntimeError(f"MT5 init failed: {code} - {desc}")
 
