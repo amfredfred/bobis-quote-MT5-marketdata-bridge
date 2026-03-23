@@ -7,7 +7,6 @@ from pydantic import BaseModel, validator
 from fastapi import HTTPException
 from configs import Config
 from concurrent.futures import ThreadPoolExecutor, as_completed
-import zoneinfo
 
 logger = logging.getLogger(__name__)
 
@@ -75,7 +74,6 @@ class CandleRequest(BaseModel):
     limit: Optional[int] = None
     from_date: Optional[str] = None
     to_date: Optional[str] = None
-    timezone: str = Config.TIMEZONE
 
     @validator("timeframes")
     def validate_timeframes(cls, v):
@@ -124,13 +122,15 @@ _DATE_FORMATS = [
     "%m/%d/%Y",
 ]
 
-_TZ_CACHE: dict[str, zoneinfo.ZoneInfo] = {}
 
-
-def _get_tz(tz_name: str) -> zoneinfo.ZoneInfo:
-    if tz_name not in _TZ_CACHE:
-        _TZ_CACHE[tz_name] = zoneinfo.ZoneInfo(tz_name)
-    return _TZ_CACHE[tz_name]
+def _parse_date_utc(date_str: str) -> datetime:
+    """Parse a date string, always treating it as UTC."""
+    for fmt in _DATE_FORMATS:
+        try:
+            return datetime.strptime(date_str, fmt).replace(tzinfo=timezone.utc)
+        except ValueError:
+            continue
+    raise ValueError(f"Unable to parse date string: {date_str!r}")
 
 
 class CandleDataService:
@@ -139,20 +139,6 @@ class CandleDataService:
     def broker_ts_to_utc_ms(server_timestamp: int) -> int:
         offset = get_broker_utc_offset()
         return (server_timestamp - offset * 3600) * 1000
-
-    @staticmethod
-    def parse_date_string(date_str: str, tz_name: str = Config.TIMEZONE) -> datetime:
-        tz = _get_tz(tz_name)
-        for fmt in _DATE_FORMATS:
-            try:
-                return (
-                    datetime.strptime(date_str, fmt)
-                    .replace(tzinfo=tz)
-                    .astimezone(timezone.utc)
-                )
-            except ValueError:
-                continue
-        raise ValueError(f"Unable to parse date string: {date_str!r}")
 
     @staticmethod
     def _build_candles(rates, offset: int) -> List[Candle]:
@@ -179,7 +165,6 @@ class CandleDataService:
         limit: Optional[int] = None,
         from_date: Optional[str] = None,
         to_date: Optional[str] = None,
-        tz_name: str = Config.TIMEZONE,
     ) -> List[Candle]:
         try:
             timeframe_enum = TimeframeConverter.to_mt5(timeframe)
@@ -189,16 +174,16 @@ class CandleDataService:
             dt_to: Optional[datetime] = None
 
             if from_date:
-                dt_from = CandleDataService.parse_date_string(from_date, tz_name)
-                dt_from += timedelta(hours=offset)
+                dt_from = _parse_date_utc(from_date) + timedelta(hours=offset)
             if to_date:
-                dt_to = CandleDataService.parse_date_string(to_date, tz_name)
-                dt_to += timedelta(days=1)
+                dt_to = _parse_date_utc(to_date) + timedelta(hours=offset + 24)
 
             with _MT5_LOCK:
                 if dt_from:
                     if not dt_to:
-                        dt_to = datetime.now(timezone.utc) + timedelta(days=1)
+                        dt_to = datetime.now(timezone.utc) + timedelta(
+                            hours=offset + 24
+                        )
                     rates = mt5.copy_rates_range(symbol, timeframe_enum, dt_from, dt_to)
                 elif limit:
                     rates = mt5.copy_rates_from_pos(symbol, timeframe_enum, 0, limit)
@@ -240,7 +225,6 @@ class CandleDataService:
                         request.limit,
                         request.from_date,
                         request.to_date,
-                        request.timezone,
                     ),
                 )
             except HTTPException as e:

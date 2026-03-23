@@ -56,12 +56,11 @@ async def get_time_series_query(
         None, description="Number of candles to return", gt=0, le=1000
     ),
     from_date: Optional[str] = Query(
-        None, description="Start date (YYYY-MM-DD or YYYY-MM-DD HH:MM:SS)"
+        None, description="Start date UTC (YYYY-MM-DD or YYYY-MM-DD HH:MM:SS)"
     ),
     to_date: Optional[str] = Query(
-        None, description="End date (YYYY-MM-DD or YYYY-MM-DD HH:MM:SS)"
+        None, description="End date UTC (YYYY-MM-DD or YYYY-MM-DD HH:MM:SS)"
     ),
-    timezone: str = Query("UTC", description="Timezone for timestamps"),
 ):
     return CandleDataService.get_multiple_timeframes(
         CandleRequest(
@@ -70,7 +69,6 @@ async def get_time_series_query(
             limit=limit,
             from_date=from_date,
             to_date=to_date,
-            timezone=timezone,
         )
     )
 
