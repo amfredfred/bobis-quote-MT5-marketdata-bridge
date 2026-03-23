@@ -17,16 +17,20 @@ _THREAD_POOL = ThreadPoolExecutor(max_workers=20)
 
 
 def clean_symbol(symbol: str) -> str:
+    """Remove slashes and underscores to match MT5 symbol names."""
     return symbol.replace("/", "").replace("_", "")
 
 
 def get_broker_utc_offset() -> int:
+    """Determine the broker's UTC offset by comparing a crypto tick timestamp with real UTC."""
     global _BROKER_UTC_OFFSET
     if _BROKER_UTC_OFFSET is not None:
         return _BROKER_UTC_OFFSET
 
     tick = None
     for symbol in _OFFSET_SYMBOLS:
+        # Note: symbol_select might be needed for crypto symbols as well.
+        # We don't call symbol_select here to keep offset calculation fast.
         t = mt5.symbol_info_tick(symbol)
         if t is not None:
             tick = t
@@ -178,7 +182,17 @@ class CandleDataService:
             if to_date:
                 dt_to = _parse_date_utc(to_date) + timedelta(hours=offset + 24)
 
+            # --- Critical: ensure the symbol is selected in Market Watch ---
             with _MT5_LOCK:
+                if not mt5.symbol_select(symbol, True):
+                    code, desc = mt5.last_error()
+                    logger.error(f"Failed to select symbol {symbol}: {code} - {desc}")
+                    raise HTTPException(
+                        status_code=404,
+                        detail=f"Symbol {symbol} not available or could not be selected. MT5 error: {code} - {desc}",
+                    )
+
+                # Now fetch data
                 if dt_from:
                     if not dt_to:
                         dt_to = datetime.now(timezone.utc) + timedelta(
@@ -194,8 +208,11 @@ class CandleDataService:
                     )
 
             if rates is None or len(rates) == 0:
+                code, desc = mt5.last_error()
+                logger.warning(f"No data for {symbol} {timeframe}: {code} - {desc}")
                 raise HTTPException(
-                    status_code=404, detail=f"No data for {symbol} {timeframe}"
+                    status_code=404,
+                    detail=f"No data for {symbol} {timeframe}. MT5 error: {code} - {desc}",
                 )
 
             candles = CandleDataService._build_candles(rates, offset)
@@ -205,6 +222,7 @@ class CandleDataService:
         except HTTPException:
             raise
         except Exception as e:
+            logger.exception(f"Unexpected error fetching {symbol} {timeframe}")
             raise HTTPException(
                 status_code=500,
                 detail=f"Error fetching data for {symbol} {timeframe}: {e}",
@@ -228,12 +246,15 @@ class CandleDataService:
                     ),
                 )
             except HTTPException as e:
+                # Log the full error including MT5 last error
+                code, desc = mt5.last_error()
                 logger.error(
-                    "MT5 error for %s/%s: %s — mt5_error=%s",
+                    "MT5 error for %s/%s: %s — mt5_error=(%s, '%s')",
                     symbol,
                     tf,
                     e.detail,
-                    mt5.last_error(),
+                    code,
+                    desc,
                 )
                 return symbol, tf, {"error": str(e.detail)}
 
