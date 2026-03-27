@@ -65,19 +65,19 @@ def resolve_broker_symbol(engine_symbol: str) -> str:
 
         # Exact match
         if upper_name == clean:
-            _SYMBOL_CACHE[clean] = name  # ✅ preserve original casing
+            _SYMBOL_CACHE[clean] = name
             return name
 
         # Prefix OR suffix match
         if upper_name.startswith(clean) or upper_name.endswith(clean):
-            matches.append(name)  # ✅ keep original
+            matches.append(name)
 
     if len(matches) == 1:
         resolved = matches[0]
     elif len(matches) > 1:
         resolved = sorted(matches, key=len)[0]
     else:
-        resolved = clean  # fallback (no casing change anyway)
+        resolved = clean
 
     _SYMBOL_CACHE[clean] = resolved
     return resolved
@@ -99,8 +99,6 @@ def get_broker_utc_offset() -> int:
     for symbol in _OFFSET_SYMBOLS:
         resolved = resolve_broker_symbol(symbol)
 
-        print(f"resolved: {resolved}")
-
         with _MT5_LOCK:
             mt5.symbol_select(resolved, True)
             t = mt5.symbol_info_tick(resolved)
@@ -111,6 +109,7 @@ def get_broker_utc_offset() -> int:
 
     if tick is None:
         logger.warning("No tick available — assuming UTC+0")
+        _BROKER_UTC_OFFSET = 0
         return 0
 
     true_utc_now = datetime.now(timezone.utc).timestamp()
@@ -213,6 +212,18 @@ def _parse_date_utc(date_str: str) -> datetime:
     raise ValueError(f"Unable to parse date string: {date_str!r}")
 
 
+def _utc_to_broker_naive(dt_utc: datetime, offset: int) -> datetime:
+    """
+    Convert a UTC-aware datetime to a naive datetime in broker local time.
+
+    MT5's copy_rates_range() expects naive datetimes in broker local time.
+    Passing a tz-aware datetime causes MT5 to treat it as UTC, which with
+    our offset conversion results in a double-shift (fetching offset hours
+    too late). Stripping tzinfo after the conversion prevents this.
+    """
+    return (dt_utc + timedelta(hours=offset)).replace(tzinfo=None)
+
+
 # =========================
 # SERVICE
 # =========================
@@ -227,6 +238,14 @@ class CandleDataService:
 
     @staticmethod
     def _build_candles(rates, offset: int) -> List[Candle]:
+        """
+        Convert MT5 rate array to Candle list.
+
+        MT5 copy_rates_* returns rate["time"] as a Unix timestamp encoded in
+        broker local time (i.e. the broker-local wall-clock seconds since epoch,
+        NOT true UTC seconds). Subtracting the broker UTC offset converts it to
+        a true UTC Unix timestamp, which is then stored as milliseconds.
+        """
         has_real_volume = "real_volume" in rates.dtype.names
 
         candles = []
@@ -262,10 +281,13 @@ class CandleDataService:
             dt_to: Optional[datetime] = None
 
             if from_date:
-                dt_from = _parse_date_utc(from_date) + timedelta(hours=offset)
+                # Parse as UTC then convert to naive broker local for MT5.
+                # Must be naive — MT5 treats tz-aware datetimes as UTC which
+                # would double-apply the offset and shift the window forward.
+                dt_from = _utc_to_broker_naive(_parse_date_utc(from_date), offset)
 
             if to_date:
-                dt_to = _parse_date_utc(to_date) + timedelta(hours=offset + 24)
+                dt_to = _utc_to_broker_naive(_parse_date_utc(to_date), offset)
 
             with _MT5_LOCK:
                 if not mt5.symbol_select(symbol, True):
@@ -277,9 +299,8 @@ class CandleDataService:
 
                 if dt_from:
                     if not dt_to:
-                        dt_to = datetime.now(timezone.utc) + timedelta(
-                            hours=offset + 24
-                        )
+                        # Current broker local time, naive — no +24 padding needed.
+                        dt_to = _utc_to_broker_naive(datetime.now(timezone.utc), offset)
 
                     rates = mt5.copy_rates_range(symbol, timeframe_enum, dt_from, dt_to)
 
