@@ -39,6 +39,7 @@ New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
 & $NssmExe set $ServiceName Start         SERVICE_AUTO_START
 & $NssmExe set $ServiceName DisplayName   "BobiFX Candle Service (MT5)"
 & $NssmExe set $ServiceName Description   "FastAPI MT5 candle data server on port 8000."
+& $NssmExe set $ServiceName AppThrottle 15000  # wait 15s before starting
 
 # Auto-restart on failure: 5s, 10s, 30s
 sc.exe failure $ServiceName reset= 60 actions= restart/5000/restart/10000/restart/30000 | Out-Null
