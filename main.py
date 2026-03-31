@@ -12,7 +12,7 @@ from configs import Config
 import asyncio
 import logging
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=Config.LOG_LEVEL)
 logger = logging.getLogger(__name__)
 
 
