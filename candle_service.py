@@ -6,6 +6,9 @@ from typing import List, Optional
 from pydantic import BaseModel, validator
 from fastapi import HTTPException
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import numpy as np
+import time
+
 
 logger = logging.getLogger(__name__)
 
@@ -18,6 +21,10 @@ _THREAD_POOL = ThreadPoolExecutor(max_workers=20)
 _SYMBOL_CACHE: dict[str, str] = {}
 _ALL_SYMBOLS: list[str] = []
 
+_MT5_INVALID_PARAMS = -2
+_HISTORY_LOAD_RETRIES = 3
+_HISTORY_LOAD_WAIT = 0.5
+_MAX_MT5_BATCH = 1_000 
 
 # =========================
 # SYMBOL PRELOAD
@@ -125,6 +132,90 @@ def get_broker_utc_offset() -> int:
     )
 
     return _BROKER_UTC_OFFSET
+
+
+def _rates_from_pos_batched(
+    symbol: str,
+    timeframe_enum: int,
+    limit: int,
+) -> Optional[object]:
+    """
+    Fetch `limit` bars in chunks of _MAX_MT5_BATCH using position offsets.
+
+    Error -2 (Invalid params) has two distinct meanings:
+      - On the FIRST batch: MT5 hasn't loaded this symbol/timeframe into
+        memory yet. Retry with a short sleep to allow the terminal to
+        finish loading history.
+      - On SUBSEQUENT batches: the position offset exceeds the broker's
+        available history depth. Treat this as a normal end-of-history
+        signal and return whatever was collected so far.
+
+    Must be called while _MT5_LOCK is already held by the caller.
+    """
+    import numpy as np
+
+    batches = []
+    fetched = 0
+
+    while fetched < limit:
+        batch_size = min(_MAX_MT5_BATCH, limit - fetched)
+        batch = None
+        last_err = (0, "")
+
+        # Retry loop only applies to the first batch — subsequent batches
+        # failing with -2 mean history is exhausted, not that data is missing.
+        attempts = _HISTORY_LOAD_RETRIES if fetched == 0 else 1
+
+        for attempt in range(1, attempts + 1):
+            batch = mt5.copy_rates_from_pos(symbol, timeframe_enum, fetched, batch_size)
+            last_err = mt5.last_error()
+
+            if batch is not None and len(batch) > 0:
+                break  # success
+
+            if last_err[0] == _MT5_INVALID_PARAMS and attempt < attempts:
+                logger.warning(
+                    "MT5 -2 on %s (attempt %d/%d), waiting %.1fs for history load",
+                    symbol,
+                    attempt,
+                    attempts,
+                    _HISTORY_LOAD_WAIT,
+                )
+                time.sleep(_HISTORY_LOAD_WAIT)
+            else:
+                break
+
+        if batch is None or len(batch) == 0:
+            code, desc = last_err
+            if fetched > 0 and code == _MT5_INVALID_PARAMS:
+                # Normal: position offset is past available history depth.
+                logger.debug(
+                    "%s: history exhausted at position %d after %d bars",
+                    symbol,
+                    fetched,
+                    fetched,
+                )
+            elif code != 0:
+                logger.warning(
+                    "%s: copy_rates_from_pos failed at pos=%d — %d: %s",
+                    symbol,
+                    fetched,
+                    code,
+                    desc,
+                )
+            break
+
+        batches.append(batch)
+        fetched += len(batch)
+
+        if len(batch) < batch_size:
+            # MT5 returned fewer bars than requested — history is exhausted.
+            break
+
+    if not batches:
+        return None
+
+    return np.concatenate(batches) if len(batches) > 1 else batches[0]
 
 
 # =========================
@@ -305,7 +396,7 @@ class CandleDataService:
                     rates = mt5.copy_rates_range(symbol, timeframe_enum, dt_from, dt_to)
 
                 elif limit:
-                    rates = mt5.copy_rates_from_pos(symbol, timeframe_enum, 0, limit)
+                    rates = _rates_from_pos_batched(symbol, timeframe_enum, limit)
 
                 else:
                     raise HTTPException(
