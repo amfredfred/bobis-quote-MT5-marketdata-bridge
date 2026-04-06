@@ -23,7 +23,7 @@ _ALL_SYMBOLS: list[str] = []
 
 _MT5_INVALID_PARAMS = -2
 _HISTORY_LOAD_RETRIES = 3
-_HISTORY_LOAD_WAIT = 0.5
+_HISTORY_LOAD_WAIT = 1.5
 _MAX_MT5_BATCH = 1_000 
 
 # =========================
@@ -390,10 +390,26 @@ class CandleDataService:
 
                 if dt_from:
                     if not dt_to:
-                        # Current broker local time, naive — no +24 padding needed.
                         dt_to = _utc_to_broker_naive(datetime.now(timezone.utc), offset)
 
-                    rates = mt5.copy_rates_range(symbol, timeframe_enum, dt_from, dt_to)
+                    rates = None
+                    for attempt in range(1, _HISTORY_LOAD_RETRIES + 1):
+                        rates = mt5.copy_rates_range(symbol, timeframe_enum, dt_from, dt_to)
+                        err_code, err_desc = mt5.last_error()
+
+                        if rates is not None and len(rates) > 0:
+                            break
+
+                        if err_code == _MT5_INVALID_PARAMS and attempt < _HISTORY_LOAD_RETRIES:
+                            logger.warning(
+                                "MT5 -2 on %s %s range fetch (attempt %d/%d) "
+                                "— terminal still loading history, waiting %.1fs",
+                                symbol, timeframe_enum, attempt, _HISTORY_LOAD_RETRIES,
+                                _HISTORY_LOAD_WAIT,
+                            )
+                            time.sleep(_HISTORY_LOAD_WAIT)
+                        else:
+                            break
 
                 elif limit:
                     rates = _rates_from_pos_batched(symbol, timeframe_enum, limit)
