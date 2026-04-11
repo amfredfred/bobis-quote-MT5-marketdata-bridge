@@ -1,14 +1,15 @@
 import atexit
 import logging
+import os
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from typing import Optional
 
 import MetaTrader5 as mt5
-import numpy as np
 from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
+from configs import Config  
 
 logger = logging.getLogger(__name__)
 
@@ -25,14 +26,13 @@ _THREAD_POOL = ThreadPoolExecutor(max_workers=20)
 atexit.register(_THREAD_POOL.shutdown, wait=True)
 
 # =========================
-# BROKER OFFSET (AUTO)
+# BROKER OFFSET
 # =========================
 
 _BROKER_OFFSET_SECONDS: Optional[float] = None
 _OFFSET_INITIALIZED = False
 _OFFSET_INIT_LOCK = threading.Lock()
-
-
+ 
 def _detect_broker_offset_once() -> float:
     global _BROKER_OFFSET_SECONDS, _OFFSET_INITIALIZED
 
@@ -40,27 +40,23 @@ def _detect_broker_offset_once() -> float:
         if _OFFSET_INITIALIZED:
             return _BROKER_OFFSET_SECONDS or 0.0
 
-        with _MT5_LOCK:
-            tick = mt5.symbol_info_tick("EURUSD")
+        raw = Config.BROKER_UTC_OFFSET_HOURS
+        if raw is None:
+            raise RuntimeError(
+                "BROKER_UTC_OFFSET_HOURS is not set. "
+                "Add it to your .env (e.g. BROKER_UTC_OFFSET_HOURS=2 for FBS)."
+            )
 
-        if not tick:
-            raise RuntimeError("Failed to detect broker time")
-
-        broker_ts = float(tick.time)
-        utc_ts = datetime.now(timezone.utc).timestamp()
-
-        offset = broker_ts - utc_ts
-        offset = round(offset / 60) * 60  # stabilize
+        try:
+            offset = float(raw) * 3600
+        except ValueError:
+            raise RuntimeError(
+                f"Invalid BROKER_UTC_OFFSET_HOURS={raw!r} — must be a number (e.g. 2 or 2.5)."
+            )
 
         _BROKER_OFFSET_SECONDS = offset
         _OFFSET_INITIALIZED = True
-
-        logger.info(
-            "✅ Broker offset detected: %+.0fs (%+.1fh)",
-            offset,
-            offset / 3600,
-        )
-
+        logger.info("✅ Broker offset: %+.0fs (%+.1fh)", offset, offset / 3600)
         return offset
 
 
@@ -165,7 +161,6 @@ def resolve_broker_symbol(symbol: str) -> str:
         all_symbols = list(_ALL_SYMBOLS)
 
     matches = [n for n in all_symbols if clean in n.upper()]
-
     resolved = matches[0] if matches else clean
 
     with _CACHE_LOCK:
@@ -188,7 +183,7 @@ def _parse_utc_date(s: str) -> datetime:
     for f in formats:
         try:
             return datetime.strptime(s, f).replace(tzinfo=timezone.utc)
-        except:
+        except ValueError:
             continue
     raise ValueError(f"Invalid date: {s}")
 
@@ -203,27 +198,24 @@ def _utc_to_broker(dt: datetime, offset: float) -> datetime:
 # =========================
 
 
-def _build(rates, offset):
+def _build(rates, offset: float) -> list[Candle]:
     vol = (
         rates["real_volume"]
         if "real_volume" in rates.dtype.names
         else rates["tick_volume"]
     )
 
-    out = []
-    for r, v in zip(rates, vol):
-        utc_ts = float(r["time"]) - offset
-        out.append(
-            Candle(
-                timestamp=int(utc_ts * 1000),
-                open=r["open"],
-                high=r["high"],
-                low=r["low"],
-                close=r["close"],
-                volume=v,
-            )
+    return [
+        Candle(
+            timestamp=int((float(r["time"]) - offset) * 1000),
+            open=float(r["open"]),
+            high=float(r["high"]),
+            low=float(r["low"]),
+            close=float(r["close"]),
+            volume=float(v),
         )
-    return out
+        for r, v in zip(rates, vol)
+    ]
 
 
 # =========================
@@ -231,13 +223,19 @@ def _build(rates, offset):
 # =========================
 
 
-def get_candles(symbol, timeframe, limit=None, from_date=None, to_date=None):
+def get_candles(
+    symbol: str,
+    timeframe: str,
+    limit: Optional[int] = None,
+    from_date: Optional[str] = None,
+    to_date: Optional[str] = None,
+) -> list[Candle]:
     tf = _TIMEFRAME_MAP[timeframe.lower()]
     offset = get_broker_offset()
 
     with _MT5_LOCK:
         if not mt5.symbol_select(symbol, True):
-            raise HTTPException(404, "Symbol unavailable")
+            raise HTTPException(status_code=404, detail="Symbol unavailable")
 
     if from_date:
         f = _utc_to_broker(_parse_utc_date(from_date), offset)
@@ -245,7 +243,6 @@ def get_candles(symbol, timeframe, limit=None, from_date=None, to_date=None):
             _parse_utc_date(to_date) if to_date else datetime.now(timezone.utc),
             offset,
         )
-
         with _MT5_LOCK:
             rates = mt5.copy_rates_range(symbol, tf, f, t)
     else:
@@ -253,7 +250,7 @@ def get_candles(symbol, timeframe, limit=None, from_date=None, to_date=None):
             rates = mt5.copy_rates_from_pos(symbol, tf, 0, limit)
 
     if rates is None or len(rates) == 0:
-        raise HTTPException(404, "No data")
+        raise HTTPException(status_code=404, detail="No data")
 
     candles = _build(rates, offset)
     candles.sort(key=lambda x: x.timestamp)
@@ -261,12 +258,14 @@ def get_candles(symbol, timeframe, limit=None, from_date=None, to_date=None):
 
 
 def get_multiple(request: CandleRequest) -> CandleResult:
-    result = {}
+    result: CandleResult = {}
 
-    def job(s, tf):
+    def job(s: str, tf: str):
         try:
-            r = resolve_broker_symbol(s)
-            data = get_candles(r, tf, request.limit, request.from_date, request.to_date)
+            resolved = resolve_broker_symbol(s)
+            data = get_candles(
+                resolved, tf, request.limit, request.from_date, request.to_date
+            )
             return s, tf, data
         except Exception as e:
             return s, tf, {"error": str(e)}
@@ -277,8 +276,8 @@ def get_multiple(request: CandleRequest) -> CandleResult:
         for tf in request.timeframes
     }
 
-    for f in as_completed(futures):
-        s, tf, data = f.result()
+    for future in as_completed(futures):
+        s, tf, data = future.result()
         result.setdefault(s, {})[tf] = data
 
     return result
