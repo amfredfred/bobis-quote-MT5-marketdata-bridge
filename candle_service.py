@@ -1,7 +1,6 @@
 import atexit
 import logging
 import threading
-import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from typing import Optional
@@ -18,19 +17,62 @@ logger = logging.getLogger(__name__)
 # =========================
 
 _MT5_LOCK = threading.Lock()
-_OFFSET_LOCK = threading.Lock()
-_CACHE_LOCK = threading.Lock()
-_SYMBOLS_LOCK = threading.RLock()  # dedicated lock for _ALL_SYMBOLS
-
-_THREAD_POOL = ThreadPoolExecutor(max_workers=20)
-atexit.register(_THREAD_POOL.shutdown, wait=True)  # FIX: wait=True to avoid partial writes
-
+_CACHE_LOCK = threading.RLock()
 _SYMBOL_CACHE: dict[str, str] = {}
 _ALL_SYMBOLS: list[str] = []
 
+_THREAD_POOL = ThreadPoolExecutor(max_workers=20)
+atexit.register(_THREAD_POOL.shutdown, wait=True)
+
+# =========================
+# BROKER OFFSET (AUTO)
+# =========================
+
 _BROKER_OFFSET_SECONDS: Optional[float] = None
-_OFFSET_LAST_SYNC: Optional[float] = None
-_OFFSET_REFRESH_INTERVAL = 3600  # 1 hour
+_OFFSET_INITIALIZED = False
+_OFFSET_INIT_LOCK = threading.Lock()
+
+
+def _detect_broker_offset_once() -> float:
+    global _BROKER_OFFSET_SECONDS, _OFFSET_INITIALIZED
+
+    with _OFFSET_INIT_LOCK:
+        if _OFFSET_INITIALIZED:
+            return _BROKER_OFFSET_SECONDS or 0.0
+
+        with _MT5_LOCK:
+            tick = mt5.symbol_info_tick("EURUSD")
+
+        if not tick:
+            raise RuntimeError("Failed to detect broker time")
+
+        broker_ts = float(tick.time)
+        utc_ts = datetime.now(timezone.utc).timestamp()
+
+        offset = broker_ts - utc_ts
+        offset = round(offset / 60) * 60  # stabilize
+
+        _BROKER_OFFSET_SECONDS = offset
+        _OFFSET_INITIALIZED = True
+
+        logger.info(
+            "✅ Broker offset detected: %+.0fs (%+.1fh)",
+            offset,
+            offset / 3600,
+        )
+
+        return offset
+
+
+def get_broker_offset() -> float:
+    if not _OFFSET_INITIALIZED:
+        return _detect_broker_offset_once()
+    return _BROKER_OFFSET_SECONDS or 0.0
+
+
+# =========================
+# TIMEFRAMES
+# =========================
 
 _TIMEFRAME_MAP = {
     "1m": mt5.TIMEFRAME_M1,
@@ -46,15 +88,15 @@ _TIMEFRAME_MAP = {
 
 _MAX_BATCH = 5000
 
+
 # =========================
 # MODELS
 # =========================
 
-class Candle(BaseModel):
-    # Pydantic v2 API
-    model_config = ConfigDict(frozen=True)
 
-    timestamp: int  # UTC milliseconds
+class Candle(BaseModel):
+    model_config = ConfigDict(frozen=True)
+    timestamp: int
     open: float
     high: float
     low: float
@@ -71,56 +113,45 @@ class CandleRequest(BaseModel):
 
     @field_validator("timeframes")
     @classmethod
-    def validate_timeframes(cls, v: list[str]) -> list[str]:
-        normalised = []
+    def validate_timeframes(cls, v):
+        out = []
         for tf in v:
-            key = tf.lower()
-            if key not in _TIMEFRAME_MAP:
-                raise ValueError(f"Invalid timeframe: {tf!r}. Valid values: {sorted(_TIMEFRAME_MAP)}")
-            normalised.append(key)  # FIX: return normalised list
-        return normalised
+            k = tf.lower()
+            if k not in _TIMEFRAME_MAP:
+                raise ValueError(f"Invalid timeframe: {tf}")
+            out.append(k)
+        return out
 
     @model_validator(mode="after")
-    def validate_date_limit_exclusivity(self) -> "CandleRequest":
-        """Exactly one of from_date or limit must be provided."""
+    def validate(self):
         if self.from_date and self.limit:
-            raise ValueError(
-                "Provide either 'from_date' or 'limit', not both. "
-                "'from_date' defines a date range; 'limit' fetches the N most recent bars."
-            )
+            raise ValueError("Provide from_date OR limit")
         if not self.from_date and not self.limit:
-            raise ValueError("Provide either 'from_date' or 'limit'.")
+            raise ValueError("Provide from_date or limit")
         return self
 
 
-# Type alias for the multi-symbol response
-CandleResult = dict[str, dict[str, list[Candle] | dict[str, str]]]
+CandleResult = dict[str, dict[str, list[Candle] | dict]]
 
 
 # =========================
 # SYMBOLS
 # =========================
 
-def preload_symbols() -> None:
+
+def preload_symbols():
     global _ALL_SYMBOLS
 
     with _MT5_LOCK:
-        # FIX: fetch once, reuse the result
         symbols = mt5.symbols_get()
         if not symbols:
-            logger.warning("No symbols returned from MT5")
             return
-
         for s in symbols:
             mt5.symbol_select(s.name, True)
-
         names = [s.name for s in symbols]
 
-    # FIX: write to _ALL_SYMBOLS under its own dedicated lock
-    with _SYMBOLS_LOCK:
+    with _CACHE_LOCK:
         _ALL_SYMBOLS = names
-
-    logger.info("Loaded %d symbols", len(names))
 
 
 def resolve_broker_symbol(symbol: str) -> str:
@@ -130,24 +161,12 @@ def resolve_broker_symbol(symbol: str) -> str:
         if clean in _SYMBOL_CACHE:
             return _SYMBOL_CACHE[clean]
 
-    # FIX: read _ALL_SYMBOLS under its lock
-    with _SYMBOLS_LOCK:
+    with _CACHE_LOCK:
         all_symbols = list(_ALL_SYMBOLS)
 
-    matches = [
-        n for n in all_symbols
-        if n.upper() == clean
-        or n.upper().startswith(clean)
-        or n.upper().endswith(clean)
-    ]
+    matches = [n for n in all_symbols if clean in n.upper()]
 
-    if not matches:
-        resolved = clean
-    elif len(matches) == 1:
-        resolved = matches[0]
-    else:
-        exact = [n for n in matches if n.upper() == clean]
-        resolved = exact[0] if exact else sorted(matches, key=len)[0]
+    resolved = matches[0] if matches else clean
 
     with _CACHE_LOCK:
         _SYMBOL_CACHE[clean] = resolved
@@ -156,275 +175,110 @@ def resolve_broker_symbol(symbol: str) -> str:
 
 
 # =========================
-# OFFSET
+# DATE
 # =========================
 
-def get_broker_offset_seconds(symbol: str = "EURUSD") -> float:
-    """
-    Detects the broker's UTC offset by comparing the last tick timestamp
-    to the current UTC wall clock. Result is cached and refreshed hourly
-    to handle DST transitions automatically.
-    """
-    global _BROKER_OFFSET_SECONDS, _OFFSET_LAST_SYNC
 
-    now = time.monotonic()
-
-    # Fast path — read outside lock (intentional: stale reads are safe here,
-    # double-check inside the lock before recomputing).
-    if (
-        _BROKER_OFFSET_SECONDS is not None
-        and _OFFSET_LAST_SYNC is not None
-        and now - _OFFSET_LAST_SYNC < _OFFSET_REFRESH_INTERVAL
-    ):
-        return _BROKER_OFFSET_SECONDS
-
-    # FIX: re-validate inside the lock to prevent redundant recomputation
-    with _OFFSET_LOCK:
-        if (
-            _BROKER_OFFSET_SECONDS is not None
-            and _OFFSET_LAST_SYNC is not None
-            and now - _OFFSET_LAST_SYNC < _OFFSET_REFRESH_INTERVAL
-        ):
-            return _BROKER_OFFSET_SECONDS
-
-        for attempt in range(5):
-            with _MT5_LOCK:
-                tick = mt5.symbol_info_tick(symbol)
-
-            if tick and tick.time:
-                broker_ts = float(tick.time)
-                utc_ts = datetime.now(timezone.utc).timestamp()
-                offset = broker_ts - utc_ts
-
-                if -12 * 3600 <= offset <= 14 * 3600:
-                    _BROKER_OFFSET_SECONDS = offset
-                    _OFFSET_LAST_SYNC = now
-                    logger.info("Broker offset: %.2fs (attempt %d)", offset, attempt + 1)
-                    return offset
-
-            time.sleep(0.2)
-
-        logger.warning("Broker offset detection failed after 5 attempts — falling back to 0")
-        _BROKER_OFFSET_SECONDS = 0.0
-        _OFFSET_LAST_SYNC = now
-        return 0.0
-
-
-# =========================
-# HELPERS
-# =========================
-
-def _parse_date(date_str: str) -> datetime:
-    """
-    Parse a date string in one of several accepted formats.
-    The caller is responsible for attaching timezone info after parsing.
-    Accepted formats treat input as UTC; no local-time interpretation is done.
-    """
-    for fmt in (
-        "%Y-%m-%dT%H:%M:%SZ",   # ISO 8601 with explicit Z
+def _parse_utc_date(s: str) -> datetime:
+    formats = [
+        "%Y-%m-%dT%H:%M:%SZ",
         "%Y-%m-%d %H:%M:%S",
-        "%Y-%m-%d %H:%M",
         "%Y-%m-%d",
-        "%d/%m/%Y %H:%M:%S",
-        "%d/%m/%Y",
-    ):
+    ]
+    for f in formats:
         try:
-            return datetime.strptime(date_str, fmt)
-        except ValueError:
+            return datetime.strptime(s, f).replace(tzinfo=timezone.utc)
+        except:
             continue
-    raise ValueError(
-        f"Invalid date: {date_str!r}. "
-        "Expected formats: YYYY-MM-DD, YYYY-MM-DD HH:MM:SS, DD/MM/YYYY, etc."
-    )
+    raise ValueError(f"Invalid date: {s}")
 
 
-def _utc_dt_to_broker_naive(dt_utc: datetime, offset_seconds: float) -> datetime:
-    """
-    Convert a UTC-aware datetime to a broker-local naive datetime.
-
-    MT5's copy_rates_range expects naive datetimes expressed in broker-local time.
-    We achieve this by shifting the UTC epoch timestamp by the broker offset and
-    then producing a naive datetime via utcfromtimestamp, which does NOT apply
-    any local machine timezone — making this safe regardless of server locale.
-    """
-    # FIX: use utcfromtimestamp to avoid machine-local timezone contamination
-    broker_epoch = dt_utc.timestamp() + offset_seconds
-    return datetime.utcfromtimestamp(broker_epoch)
+def _utc_to_broker(dt: datetime, offset: float) -> datetime:
+    ts = dt.timestamp() + offset
+    return datetime.utcfromtimestamp(ts)
 
 
-def _build_candles(rates: np.ndarray, offset_seconds: float) -> list[Candle]:
-    """
-    Convert MT5 rate records to Candle objects with UTC millisecond timestamps.
+# =========================
+# BUILD
+# =========================
 
-    MT5 stores bar open times in broker-local time. We reverse the offset to
-    obtain UTC: utc_ts = broker_ts - offset.
-    """
+
+def _build(rates, offset):
     vol = (
         rates["real_volume"]
         if "real_volume" in rates.dtype.names
         else rates["tick_volume"]
     )
 
-    return [
-        Candle(
-            timestamp=int((float(r["time"]) - offset_seconds) * 1000),  # UTC ms
-            open=float(r["open"]),
-            high=float(r["high"]),
-            low=float(r["low"]),
-            close=float(r["close"]),
-            volume=float(v),
+    out = []
+    for r, v in zip(rates, vol):
+        utc_ts = float(r["time"]) - offset
+        out.append(
+            Candle(
+                timestamp=int(utc_ts * 1000),
+                open=r["open"],
+                high=r["high"],
+                low=r["low"],
+                close=r["close"],
+                volume=v,
+            )
         )
-        for r, v in zip(rates, vol)
-    ]
-
-
-def _fetch_rates_batched(symbol: str, tf: int, limit: int) -> Optional[np.ndarray]:
-    """
-    Fetch up to `limit` bars in MAX_BATCH-sized pages.
-
-    FIX: Acquires _MT5_LOCK per batch rather than holding it across the entire
-    loop, keeping lock contention minimal for other threads.
-    """
-    batches: list[np.ndarray] = []
-    fetched = 0
-
-    while fetched < limit:
-        size = min(_MAX_BATCH, limit - fetched)
-
-        with _MT5_LOCK:  # FIX: lock per-batch, not across the whole loop
-            batch = mt5.copy_rates_from_pos(symbol, tf, fetched, size)
-
-        if batch is None or len(batch) == 0:
-            break
-
-        batches.append(batch)
-        fetched += len(batch)
-
-        if len(batch) < size:
-            break  # MT5 returned fewer bars than requested — we're at the start of history
-
-    if not batches:
-        return None
-
-    return np.concatenate(batches) if len(batches) > 1 else batches[0]
+    return out
 
 
 # =========================
 # CORE
 # =========================
 
-def get_candles(
-    symbol: str,
-    timeframe: str,
-    limit: Optional[int] = None,
-    from_date: Optional[str] = None,
-    to_date: Optional[str] = None,
-) -> list[Candle]:
-    """
-    Fetch OHLCV candles for a single symbol/timeframe combination.
 
-    Exactly one of `from_date` or `limit` must be provided.
-    All returned timestamps are UTC milliseconds.
-    """
-    if from_date and limit:
-        raise HTTPException(
-            status_code=400,
-            detail="Provide either 'from_date' or 'limit', not both.",
-        )
-    if not from_date and not limit:
-        raise HTTPException(
-            status_code=400,
-            detail="Provide either 'from_date' or 'limit'.",
+def get_candles(symbol, timeframe, limit=None, from_date=None, to_date=None):
+    tf = _TIMEFRAME_MAP[timeframe.lower()]
+    offset = get_broker_offset()
+
+    with _MT5_LOCK:
+        if not mt5.symbol_select(symbol, True):
+            raise HTTPException(404, "Symbol unavailable")
+
+    if from_date:
+        f = _utc_to_broker(_parse_utc_date(from_date), offset)
+        t = _utc_to_broker(
+            _parse_utc_date(to_date) if to_date else datetime.now(timezone.utc),
+            offset,
         )
 
-    tf = _TIMEFRAME_MAP.get(timeframe.lower())
-    if tf is None:
-        raise HTTPException(status_code=400, detail=f"Invalid timeframe: {timeframe!r}")
-
-    offset = get_broker_offset_seconds(symbol)
-
-    try:
         with _MT5_LOCK:
-            if not mt5.symbol_select(symbol, True):
-                code, desc = mt5.last_error()
-                raise HTTPException(
-                    status_code=404,
-                    detail=f"Symbol {symbol!r} not available: [{code}] {desc}",
-                )
+            rates = mt5.copy_rates_range(symbol, tf, f, t)
+    else:
+        with _MT5_LOCK:
+            rates = mt5.copy_rates_from_pos(symbol, tf, 0, limit)
 
-        if from_date:
-            # FIX: parse → attach UTC → convert to broker-local naive
-            dt_from_utc = _parse_date(from_date).replace(tzinfo=timezone.utc)
-            dt_to_utc = (
-                _parse_date(to_date).replace(tzinfo=timezone.utc)
-                if to_date
-                else datetime.now(timezone.utc)
-            )
+    if rates is None or len(rates) == 0:
+        raise HTTPException(404, "No data")
 
-            broker_from = _utc_dt_to_broker_naive(dt_from_utc, offset)
-            broker_to = _utc_dt_to_broker_naive(dt_to_utc, offset)
-
-            with _MT5_LOCK:
-                rates = mt5.copy_rates_range(symbol, tf, broker_from, broker_to)
-        else:
-            rates = _fetch_rates_batched(symbol, tf, limit)
-
-        if rates is None or len(rates) == 0:
-            with _MT5_LOCK:
-                code, desc = mt5.last_error()
-            raise HTTPException(
-                status_code=404,
-                detail=f"No data returned for {symbol!r} [{timeframe}]: [{code}] {desc}",
-            )
-
-        candles = _build_candles(rates, offset)
-        candles.sort(key=lambda c: c.timestamp)
-        return candles
-
-    except HTTPException:
-        raise
-    except Exception:
-        logger.exception("Unexpected error fetching candles for %s [%s]", symbol, timeframe)
-        raise HTTPException(status_code=500, detail="Internal server error fetching candles.")
+    candles = _build(rates, offset)
+    candles.sort(key=lambda x: x.timestamp)
+    return candles
 
 
 def get_multiple(request: CandleRequest) -> CandleResult:
-    """
-    Fetch candles for multiple symbol/timeframe combinations concurrently.
+    result = {}
 
-    Returns a nested dict: { symbol: { timeframe: [Candle, ...] | {"error": str} } }
-    Failures for individual pairs are captured and returned inline rather than
-    raising, so a single bad symbol does not abort the entire batch.
-    """
-    result: CandleResult = {}
-
-    def fetch(symbol: str, tf: str) -> tuple[str, str, list[Candle] | dict]:
+    def job(s, tf):
         try:
-            resolved = resolve_broker_symbol(symbol)
-            data = get_candles(resolved, tf, request.limit, request.from_date, request.to_date)
-            return symbol, tf, data
-        except HTTPException as e:
-            return symbol, tf, {"error": e.detail}
+            r = resolve_broker_symbol(s)
+            data = get_candles(r, tf, request.limit, request.from_date, request.to_date)
+            return s, tf, data
         except Exception as e:
-            logger.exception("Unexpected error in concurrent fetch for %s [%s]", symbol, tf)
-            return symbol, tf, {"error": "Internal error fetching candles."}
+            return s, tf, {"error": str(e)}
 
     futures = {
-        _THREAD_POOL.submit(fetch, s, tf): (s, tf)
+        _THREAD_POOL.submit(job, s, tf): (s, tf)
         for s in request.symbols
         for tf in request.timeframes
     }
 
-    for future in as_completed(futures):
-        # FIX: catch unexpected exceptions from f.result() itself
-        try:
-            symbol, tf, data = future.result()
-        except Exception:
-            symbol, tf = futures[future]
-            logger.exception("Future raised unexpectedly for %s [%s]", symbol, tf)
-            result.setdefault(symbol, {})[tf] = {"error": "Internal error."}
-            continue
-
-        result.setdefault(symbol, {})[tf] = data
+    for f in as_completed(futures):
+        s, tf, data = f.result()
+        result.setdefault(s, {})[tf] = data
 
     return result

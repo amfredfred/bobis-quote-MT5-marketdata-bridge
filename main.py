@@ -10,10 +10,13 @@ from candle_service import (
     CandleRequest,
     get_multiple,
     preload_symbols,
+    _detect_broker_offset_once,
 )
 from configs import Config
 
-logging.basicConfig(level=Config.LOG_LEVEL)
+logging.basicConfig(
+    level=Config.LOG_LEVEL, format="%(asctime)s - %(levelname)s - %(message)s"
+)
 logger = logging.getLogger(__name__)
 
 
@@ -36,9 +39,13 @@ async def lifespan(app: FastAPI):
         code, desc = mt5.last_error()
         raise RuntimeError(f"MT5 login failed: {code} - {desc}")
 
-    await asyncio.to_thread(preload_symbols)
-    logger.info("MT5 ready")
+    # ✅ One-time broker offset detection
+    await asyncio.to_thread(_detect_broker_offset_once)
 
+    # ✅ Preload symbols
+    await asyncio.to_thread(preload_symbols)
+
+    logger.info("MT5 ready")
     yield
 
     mt5.shutdown()
