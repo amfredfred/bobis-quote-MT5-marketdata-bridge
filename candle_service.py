@@ -22,7 +22,7 @@ _CACHE_LOCK = threading.RLock()
 _SYMBOL_CACHE: dict[str, str] = {}
 _ALL_SYMBOLS: list[str] = []
 
-_THREAD_POOL = ThreadPoolExecutor(max_workers=20)
+_THREAD_POOL = ThreadPoolExecutor(max_workers=3)
 atexit.register(_THREAD_POOL.shutdown, wait=True)
 
 # =========================
