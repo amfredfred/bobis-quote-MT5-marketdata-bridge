@@ -1,6 +1,7 @@
 from contextlib import asynccontextmanager
 import asyncio
 import logging
+import sys
 
 import MetaTrader5 as mt5
 from fastapi import FastAPI, Query
@@ -20,8 +21,41 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+def _make_loop_exception_handler(log: logging.Logger):
+    """
+    Suppress ConnectionResetError [WinError 10054] raised inside asyncio
+    ProactorEventLoop callbacks when a client disconnects mid-request.
+
+    On Windows, the ProactorEventLoop calls socket.shutdown(SHUT_RDWR) in
+    _call_connection_lost even when the remote already closed the connection.
+    The resulting ConnectionResetError is raised inside a callback — not a
+    coroutine — so asyncio has no awaitable to propagate it through and logs
+    it as an "Exception in callback", then stalls. Filtering it here keeps
+    the server running normally; the connection is already gone, so no data
+    is lost.
+    """
+
+    def handler(loop: asyncio.AbstractEventLoop, context: dict) -> None:
+        exc = context.get("exception")
+        if isinstance(exc, ConnectionResetError):
+            # Client disconnected — entirely normal on Windows with Proactor.
+            log.debug(
+                "Client disconnected (WinError 10054 suppressed): %s",
+                context.get("message", ""),
+            )
+            return
+        # Everything else goes through the default handler unchanged.
+        loop.default_exception_handler(context)
+
+    return handler
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Install the Windows-safe exception handler as early as possible.
+    loop = asyncio.get_running_loop()
+    loop.set_exception_handler(_make_loop_exception_handler(logger))
+
     if not mt5.initialize(
         path=Config.PATH_MT5_EXEC,
         login=Config.MT5_ACCOUNT_NUMBER,
@@ -39,10 +73,7 @@ async def lifespan(app: FastAPI):
         code, desc = mt5.last_error()
         raise RuntimeError(f"MT5 login failed: {code} - {desc}")
 
-    # ✅ One-time broker offset detection
     await asyncio.to_thread(_detect_broker_offset_once)
-
-    # ✅ Preload symbols
     await asyncio.to_thread(preload_symbols)
 
     logger.info("MT5 ready")

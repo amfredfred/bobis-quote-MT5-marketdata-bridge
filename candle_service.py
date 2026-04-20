@@ -9,7 +9,7 @@ from typing import Optional
 import MetaTrader5 as mt5
 from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
-from configs import Config  
+from configs import Config
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +32,8 @@ atexit.register(_THREAD_POOL.shutdown, wait=True)
 _BROKER_OFFSET_SECONDS: Optional[float] = None
 _OFFSET_INITIALIZED = False
 _OFFSET_INIT_LOCK = threading.Lock()
- 
+
+
 def _detect_broker_offset_once() -> float:
     global _BROKER_OFFSET_SECONDS, _OFFSET_INITIALIZED
 
@@ -73,6 +74,8 @@ def get_broker_offset() -> float:
 _TIMEFRAME_MAP = {
     "1m": mt5.TIMEFRAME_M1,
     "5m": mt5.TIMEFRAME_M5,
+    "6m": mt5.TIMEFRAME_M6,
+    "10m": mt5.TIMEFRAME_M10,
     "15m": mt5.TIMEFRAME_M15,
     "30m": mt5.TIMEFRAME_M30,
     "1h": mt5.TIMEFRAME_H1,
