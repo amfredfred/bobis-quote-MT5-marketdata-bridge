@@ -9,5 +9,5 @@ class Config:
     MT5_ACCOUNT_PASSWORD = os.getenv("MT5_ACCOUNT_PASSWORD")
     MT5_ACCOUNT_SERVER = os.getenv("MT5_ACCOUNT_SERVER")
     PATH_MT5_EXEC = os.getenv("PATH_MT5_EXEC")
-    LOG_LEVEL = os.getenv("LOG_LEVEL")
+    LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
     BROKER_UTC_OFFSET_HOURS = float(os.getenv("BROKER_UTC_OFFSET_HOURS"))

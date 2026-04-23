@@ -253,8 +253,10 @@ class Candle(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     # FIX 1 — timestamp is always UTC Unix milliseconds.
-    # The broker offset is used only to translate request boundaries into
-    # broker-local time for MT5 API calls; it is never applied to output.
+    # The broker offset is subtracted from r["time"] inside _build() so
+    # that broker-local bar times are normalised to UTC before storage.
+    # It is also added when converting request boundaries to broker-local
+    # time for MT5 API calls (copy_rates_range).
     timestamp: int
     open: float
     high: float
@@ -719,7 +721,7 @@ def _check_staleness(candles: list[Candle], timeframe: str, symbol: str) -> None
 # =============================================================================
 
 
-def _build(rates, symbol: str, timeframe: str) -> list[Candle]:
+def _build(rates, symbol: str, timeframe: str, offset_s: float = 0.0) -> list[Candle]:
     use_tick = _uses_tick_volume(symbol, rates.dtype.names)
     vol_key = "tick_volume" if use_tick else "real_volume"
     vol_arr = rates[vol_key]
@@ -736,7 +738,10 @@ def _build(rates, symbol: str, timeframe: str) -> list[Candle]:
 
     for i in range(len(rates)):
         r = rates[i]
-        ts_ms = int(float(r["time"])) * 1000
+        # MT5 returns bar open time in broker-local time (Unix epoch
+        # with the broker's UTC offset baked in).  Subtract offset_s to
+        # convert to true UTC milliseconds.
+        ts_ms = (int(float(r["time"])) - int(offset_s)) * 1000
         try:
             candles.append(
                 Candle(
@@ -817,7 +822,7 @@ class MarketDataProvider:
         if rates is None or len(rates) == 0:
             raise NoDataError(resolved, tf, from_date, to_date)
 
-        candles = _build(rates, resolved, tf)
+        candles = _build(rates, resolved, tf, offset_s)
         candles.sort(key=lambda c: c.timestamp)
 
         _validate_no_duplicate_timestamps(candles, resolved, tf)
