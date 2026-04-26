@@ -266,10 +266,10 @@ mypy src/
 
 ## Windows Service Installation
 
-Install as Windows service (see [install_candle_service.ps1](install_candle_service.ps1)):
+Install as Windows service (see [install_windows_service.ps1](install_windows_service.ps1)):
 
 ```powershell
-.\install_candle_service.ps1
+.\install_windows_service.ps1
 ```
 
 ## Troubleshooting
