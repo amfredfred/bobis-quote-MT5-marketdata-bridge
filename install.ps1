@@ -1,11 +1,11 @@
-# install_candle_service.ps1 — Run as Administrator
-# powershell -ExecutionPolicy Bypass -File install_candle_service.ps1
+# install.ps1 — Run as Administrator
+# powershell -ExecutionPolicy Bypass -File install.ps1
 
-$ServiceName = "BobiFXCandleService"
+$ServiceName = "BobisQuoteCandleService"
 $EngineDir   = Split-Path -Parent $MyInvocation.MyCommand.Path
 $PythonExe   = Join-Path $EngineDir ".venv\Scripts\python.exe"
 $MainScript  = Join-Path $EngineDir "main.py"
-$NssmExe     = Join-Path $EngineDir "..\bb-signal-engine-tf-pairs\nssm\nssm-2.24\win64\nssm.exe"
+$NssmExe     = Join-Path $EngineDir ".\nssm\nssm-2.24\win64\nssm.exe"
 $LogDir      = Join-Path $EngineDir "logs"
 
 # ── Pre-flight ────────────────────────────────────────────────────────────────
@@ -37,7 +37,7 @@ New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
 & $NssmExe set $ServiceName AppRotateFiles 1
 & $NssmExe set $ServiceName AppRotateBytes 10485760
 & $NssmExe set $ServiceName Start         SERVICE_AUTO_START
-& $NssmExe set $ServiceName DisplayName   "BobiFX Candle Service (MT5)"
+& $NssmExe set $ServiceName DisplayName   "BobisQuoteCandleService (MT5)"
 & $NssmExe set $ServiceName Description   "FastAPI MT5 candle data server on port 8000."
 & $NssmExe set $ServiceName AppThrottle 15000  # wait 15s before starting
 
