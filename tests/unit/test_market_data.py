@@ -4,7 +4,7 @@ import pytest
 from unittest.mock import Mock, patch, MagicMock
 from datetime import datetime, timezone
 
-from core import (
+from src.core import (
     MarketDataProvider,
     Candle,
     CandleRequest,
