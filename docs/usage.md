@@ -7,7 +7,7 @@
 ```bash
 # Clone and setup
 git clone <repo>
-cd mt5-candle-service
+cd bobis-quote-mt5-marketdata-bridge
 python -m venv .venv
 .venv\Scripts\activate
 

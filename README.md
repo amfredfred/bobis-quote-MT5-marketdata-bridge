@@ -54,7 +54,7 @@ requirements.txt                  # Fallback dependency pinning
 1. Clone the repository:
 ```bash
 git clone <repository-url>
-cd mt5-candle-service
+cd bobis-quote-mt5-marketdata-bridge
 ```
 
 2. Create and activate virtual environment:
