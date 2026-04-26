@@ -1,1 +1,15 @@
-GET http://127.0.0.1:8000/time-series?symbols=EURUSD&limit=10&timeframes=1m HTTP/1.1
+GET http://127.0.0.1:8000/api/v1/time-series?symbols=BTCUSD&limit=10&timeframes=1m HTTP/1.1
+
+
+### This is a sample HTTP request to the FastAPI endpoint for fetching time series data for the EURUSD symbol with a limit of 10 entries and a timeframe of 1 minute.
+POST http://127.0.0.1:8000/api/v1/time-series HTTP/1.1
+Content-Type: application/json
+Accept: application/json
+
+{
+    "symbols": ["BTCUSD"],
+    "timeframes": ["1h", "30m"],
+    "limit":10,
+    "check_staleness": false,
+    "allow_gaps": true
+}

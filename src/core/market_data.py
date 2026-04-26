@@ -36,297 +36,42 @@ import concurrent.futures
 import logging
 import threading
 from concurrent.futures import Future
-from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from queue import Empty, Queue
 from typing import Callable, Optional, TypeVar
 
 import MetaTrader5 as mt5
-from pydantic import (
-    BaseModel,
-    ConfigDict,
-    ValidationError,
-    field_validator,
-    model_validator,
-)
+from pydantic import ValidationError
 
-from configs import Config
+from .configs import Config
+from .constants import (
+    _SESSION_BREAK_INTRADAY_S,
+    _SESSION_BREAK_PREFIXES,
+    _SESSION_BREAK_WEEKEND_S,
+    _TICK_VOLUME_ONLY_PREFIXES,
+    _TIMEFRAME_MAP,
+    _TIMEFRAME_SECONDS,
+)
+from .models import (
+    Candle,
+    CandleRequest,
+    CandleResult,
+    DataIntegrityError,
+    FetchFailure,
+    FetchResult,
+    FetchSuccess,
+    GapDetectedError,
+    MarketDataError,
+    MT5ConnectionError,
+    NoDataError,
+    StaleDataError,
+    SymbolNotFoundError,
+    SymbolResolutionError,
+)
 
 logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
-
-
-# =============================================================================
-# EXCEPTIONS
-# =============================================================================
-
-
-class MarketDataError(Exception):
-    """Base for all market data errors."""
-
-
-class MT5ConnectionError(MarketDataError):
-    """Terminal is not connected or a reconnect attempt failed."""
-
-
-class SymbolNotFoundError(MarketDataError):
-    def __init__(self, symbol: str) -> None:
-        super().__init__(f"Symbol not found or unavailable: {symbol!r}")
-        self.symbol = symbol
-
-
-class SymbolResolutionError(MarketDataError):
-    def __init__(self, symbol: str, candidates: list[str]) -> None:
-        super().__init__(
-            f"Ambiguous symbol {symbol!r} — multiple matches: {candidates}. "
-            "Use the broker's exact name."
-        )
-        self.symbol = symbol
-        self.candidates = candidates
-
-
-class NoDataError(MarketDataError):
-    def __init__(
-        self,
-        symbol: str,
-        timeframe: str,
-        from_date: Optional[str] = None,
-        to_date: Optional[str] = None,
-    ) -> None:
-        super().__init__(f"No data for {symbol}/{timeframe} [{from_date} → {to_date}]")
-        self.symbol = symbol
-        self.timeframe = timeframe
-
-
-class StaleDataError(MarketDataError):
-    """The most recent bar is too far behind wall-clock time — feed is frozen."""
-
-    def __init__(
-        self,
-        symbol: str,
-        timeframe: str,
-        last_bar: datetime,
-        expected_by: datetime,
-    ) -> None:
-        super().__init__(
-            f"Stale feed for {symbol}/{timeframe}: "
-            f"last_bar={last_bar.isoformat()}, expected_by={expected_by.isoformat()}"
-        )
-        self.symbol = symbol
-        self.timeframe = timeframe
-        self.last_bar = last_bar
-        self.expected_by = expected_by
-
-
-class GapDetectedError(MarketDataError):
-    def __init__(
-        self,
-        symbol: str,
-        timeframe: str,
-        gaps: list[tuple[datetime, datetime]],
-    ) -> None:
-        super().__init__(f"Gaps in {symbol}/{timeframe}: {gaps}")
-        self.symbol = symbol
-        self.timeframe = timeframe
-        self.gaps = gaps
-
-
-class DataIntegrityError(MarketDataError):
-    def __init__(self, symbol: str, timeframe: str, issues: list[str]) -> None:
-        super().__init__(
-            f"Integrity violations in {symbol}/{timeframe} ({len(issues)} bars): {issues[:5]}"
-        )
-        self.symbol = symbol
-        self.timeframe = timeframe
-        self.issues = issues
-
-
-# =============================================================================
-# RESULT TYPES  (typed union — no mixed dict/list ambiguity)
-# =============================================================================
-
-
-@dataclass(frozen=True)
-class FetchSuccess:
-    symbol: str
-    timeframe: str
-    candles: list  # list[Candle]
-
-
-@dataclass(frozen=True)
-class FetchFailure:
-    symbol: str
-    timeframe: str
-    error: str
-    error_type: str
-
-
-FetchResult = FetchSuccess | FetchFailure
-
-
-# =============================================================================
-# CONSTANTS
-# =============================================================================
-
-_TIMEFRAME_MAP: dict[str, int] = {
-    "1m": mt5.TIMEFRAME_M1,
-    "5m": mt5.TIMEFRAME_M5,
-    "6m": mt5.TIMEFRAME_M6,
-    "10m": mt5.TIMEFRAME_M10,
-    "15m": mt5.TIMEFRAME_M15,
-    "30m": mt5.TIMEFRAME_M30,
-    "1h": mt5.TIMEFRAME_H1,
-    "4h": mt5.TIMEFRAME_H4,
-    "d1": mt5.TIMEFRAME_D1,
-    "w1": mt5.TIMEFRAME_W1,
-    "mn1": mt5.TIMEFRAME_MN1,
-}
-
-# Nominal seconds per bar — used for gap detection and staleness checks.
-# W1 / MN1 calendar-correct logic is handled separately.
-_TIMEFRAME_SECONDS: dict[str, int] = {
-    "1m": 60,
-    "5m": 300,
-    "6m": 360,
-    "10m": 600,
-    "15m": 900,
-    "30m": 1800,
-    "1h": 3600,
-    "4h": 14_400,
-    "d1": 86_400,
-    "w1": 604_800,
-    "mn1": 2_592_000,
-}
-
-# FIX 3 — Instruments where MT5 real_volume is always zero.
-# These are synthetic CFDs with no centralised exchange.
-_TICK_VOLUME_ONLY_PREFIXES = (
-    "US",
-    "UK",
-    "DE",
-    "FR",
-    "JP",
-    "AU",
-    "XAU",
-    "XAG",
-    "XPT",
-    "XPD",
-    "BTC",
-    "ETH",
-    "LTC",
-    "XRP",
-)
-
-# FIX 4 — Instruments with a daily trading session break (~2 h nightly close).
-# For these, intraday gaps up to 4 h and weekend gaps up to 72 h are normal
-# and must not be flagged as data errors.
-_SESSION_BREAK_PREFIXES = (
-    "XAU",
-    "XAG",
-    "XPT",
-    "XPD",
-    "BTC",
-    "ETH",
-    "LTC",
-    "XRP",
-    "US",
-    "UK",
-    "DE",
-    "FR",
-    "JP",
-)
-
-# Maximum gap (seconds) that is still considered a normal session break.
-# Nightly close ≈ 2 h; give 4 h of margin.
-# Weekend close ≈ 48–72 h; anything up to 75 h is ignored.
-_SESSION_BREAK_INTRADAY_S = 4 * 3600  # 4 h
-_SESSION_BREAK_WEEKEND_S = 75 * 3600  # 75 h
-
-
-# =============================================================================
-# MODELS
-# =============================================================================
-
-
-class Candle(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
-    # FIX 1 — timestamp is always UTC Unix milliseconds.
-    # The broker offset is subtracted from r["time"] inside _build() so
-    # that broker-local bar times are normalised to UTC before storage.
-    # It is also added when converting request boundaries to broker-local
-    # time for MT5 API calls (copy_rates_range).
-    timestamp: int
-    open: float
-    high: float
-    low: float
-    close: float
-    volume: float
-    # FIX 3 — callers must know whether volume is meaningful.
-    is_tick_volume: bool
-
-    @model_validator(mode="after")
-    def _validate_ohlcv(self) -> "Candle":
-        # FIX 10 — reject every class of corrupt bar MT5 can emit.
-        issues: list[str] = []
-        if self.open <= 0:
-            issues.append(f"open={self.open} <= 0")
-        if self.high <= 0:
-            issues.append(f"high={self.high} <= 0")
-        if self.low <= 0:
-            issues.append(f"low={self.low} <= 0")
-        if self.close <= 0:
-            issues.append(f"close={self.close} <= 0")
-        if self.high < self.low:
-            issues.append(f"high({self.high}) < low({self.low})")
-        if self.high < self.open:
-            issues.append(f"high({self.high}) < open({self.open})")
-        if self.high < self.close:
-            issues.append(f"high({self.high}) < close({self.close})")
-        if self.low > self.open:
-            issues.append(f"low({self.low}) > open({self.open})")
-        if self.low > self.close:
-            issues.append(f"low({self.low}) > close({self.close})")
-        if self.volume < 0:
-            issues.append(f"volume={self.volume} < 0")
-        if issues:
-            raise ValueError(f"OHLCV integrity failures: {issues}")
-        return self
-
-
-class CandleRequest(BaseModel):
-    symbols: list[str]
-    timeframes: list[str]
-    limit: Optional[int] = None
-    from_date: Optional[str] = None
-    to_date: Optional[str] = None
-    allow_gaps: bool = False
-    check_staleness: bool = True
-
-    @field_validator("timeframes")
-    @classmethod
-    def _validate_timeframes(cls, v: list[str]) -> list[str]:
-        out = []
-        for tf in v:
-            k = tf.lower()
-            if k not in _TIMEFRAME_MAP:
-                raise ValueError(
-                    f"Invalid timeframe: {tf!r}. Valid: {sorted(_TIMEFRAME_MAP)}"
-                )
-            out.append(k)
-        return out
-
-    @model_validator(mode="after")
-    def _validate_date_limit(self) -> "CandleRequest":
-        if self.from_date and self.limit:
-            raise ValueError("Provide from_date OR limit, not both")
-        if not self.from_date and not self.limit:
-            raise ValueError("Provide from_date or limit")
-        return self
-
-
-CandleResult = dict[str, dict[str, FetchResult]]
 
 
 # =============================================================================
@@ -354,9 +99,7 @@ class MT5Worker:
         self._queue: Queue = Queue()
         self._ready = threading.Event()
         self._init_error: Optional[Exception] = None
-        self._thread = threading.Thread(
-            target=self._run, daemon=True, name="mt5-worker"
-        )
+        self._thread = threading.Thread(target=self._run, daemon=True, name="mt5-worker")
         self._thread.start()
 
         if not self._ready.wait(timeout=30):
@@ -420,9 +163,7 @@ class MT5Worker:
             if mt5.terminal_info() is None:
                 logger.warning("MT5 terminal_info() is None — attempting reconnect")
                 if not mt5.initialize():
-                    raise MT5ConnectionError(
-                        f"MT5 reconnect failed: {mt5.last_error()}"
-                    )
+                    raise MT5ConnectionError(f"MT5 reconnect failed: {mt5.last_error()}")
 
         self.run_sync(_check)
 
@@ -462,25 +203,18 @@ class BrokerOffsetManager:
         try:
             return float(raw) * 3600
         except (ValueError, TypeError):
-            raise RuntimeError(
-                f"BROKER_UTC_OFFSET_HOURS={raw!r} must be numeric (e.g. 2 or 2.5)."
-            )
+            raise RuntimeError(f"BROKER_UTC_OFFSET_HOURS={raw!r} must be numeric (e.g. 2 or 2.5).")
 
     def get(self) -> float:
         with self._lock:
             now = datetime.now(timezone.utc)
-            if (
-                self._last_verified is None
-                or now - self._last_verified >= self._RECHECK_INTERVAL
-            ):
+            if self._last_verified is None or now - self._last_verified >= self._RECHECK_INTERVAL:
                 self._verify(now)
             return self._offset
 
     def _verify(self, now: datetime) -> None:
         try:
-            tick = self._worker.run_sync(
-                lambda: mt5.symbol_info_tick("EURUSD"), timeout=5.0
-            )
+            tick = self._worker.run_sync(lambda: mt5.symbol_info_tick("EURUSD"), timeout=5.0)
             if tick is not None:
                 expected_broker_ts = now.timestamp() + self._offset
                 drift_s = abs(expected_broker_ts - tick.time)
@@ -601,16 +335,12 @@ def _uses_tick_volume(symbol: str, dtype_names: tuple) -> bool:
 # =============================================================================
 
 
-def _validate_no_duplicate_timestamps(
-    candles: list[Candle], symbol: str, timeframe: str
-) -> None:
+def _validate_no_duplicate_timestamps(candles: list[Candle], symbol: str, timeframe: str) -> None:
     seen: set[int] = set()
     dupes: list[str] = []
     for c in candles:
         if c.timestamp in seen:
-            dupes.append(
-                datetime.fromtimestamp(c.timestamp / 1000, tz=timezone.utc).isoformat()
-            )
+            dupes.append(datetime.fromtimestamp(c.timestamp / 1000, tz=timezone.utc).isoformat())
         seen.add(c.timestamp)
     if dupes:
         raise DataIntegrityError(symbol, timeframe, [f"Duplicate timestamps: {dupes}"])
@@ -677,9 +407,7 @@ def _detect_gaps(
                 continue
 
         # If we reach here it's a real gap — log and record it.
-        g_start = datetime.fromtimestamp(
-            candles[i - 1].timestamp / 1000, tz=timezone.utc
-        )
+        g_start = datetime.fromtimestamp(candles[i - 1].timestamp / 1000, tz=timezone.utc)
         g_end = datetime.fromtimestamp(candles[i].timestamp / 1000, tz=timezone.utc)
         gaps.append((g_start, g_end))
         logger.warning(
@@ -805,9 +533,7 @@ class MarketDataProvider:
         if from_date:
             f_utc = _parse_utc_date(from_date)
             t_utc = (
-                _parse_utc_date(to_date)
-                if to_date
-                else (analysis_ts or _last_closed_bar_utc(tf))
+                _parse_utc_date(to_date) if to_date else (analysis_ts or _last_closed_bar_utc(tf))
             )
             f_broker = _utc_to_broker(f_utc, offset_s)
             t_broker = _utc_to_broker(t_utc, offset_s)
@@ -839,12 +565,8 @@ class MarketDataProvider:
             len(candles),
             resolved,
             tf,
-            datetime.fromtimestamp(
-                candles[0].timestamp / 1000, tz=timezone.utc
-            ).isoformat(),
-            datetime.fromtimestamp(
-                candles[-1].timestamp / 1000, tz=timezone.utc
-            ).isoformat(),
+            datetime.fromtimestamp(candles[0].timestamp / 1000, tz=timezone.utc).isoformat(),
+            datetime.fromtimestamp(candles[-1].timestamp / 1000, tz=timezone.utc).isoformat(),
             candles[0].is_tick_volume,
         )
 
@@ -894,9 +616,7 @@ class MarketDataProvider:
 
         for future in concurrent.futures.as_completed(futures):
             fetch_result = future.result()
-            result.setdefault(fetch_result.symbol, {})[
-                fetch_result.timeframe
-            ] = fetch_result
+            result.setdefault(fetch_result.symbol, {})[fetch_result.timeframe] = fetch_result
 
         return result
 
