@@ -1,9 +1,11 @@
 """MT5 Candle Service - Production-grade market data provider for MetaTrader 5."""
 
-__version__ = "1.0.0"
+__version__ = "1.0.1"
 
-from .core.market_data import MarketDataProvider
-from .core.models import (
+from core.market_data import MarketDataProvider
+from core.performance import CachedMarketDataProvider
+
+from core.models import (
     Candle,
     CandleRequest,
     FetchFailure,
@@ -21,6 +23,7 @@ from .core.models import (
 
 __all__ = [
     "MarketDataProvider",
+    "CachedMarketDataProvider",
     "Candle",
     "CandleRequest",
     "FetchSuccess",

@@ -6,8 +6,8 @@ import logging
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 
-from src.core import MarketDataProvider
-from src.core.configs import Config
+from core.performance import CachedMarketDataProvider
+from core.configs import Config
 
 from . import routes
 
@@ -20,8 +20,8 @@ async def lifespan(app: FastAPI):
     """Application lifespan: initialize provider on startup, shutdown on exit."""
     # Startup
     try:
-        app.state.provider = MarketDataProvider(Config)
-        logger.info("MarketDataProvider initialized successfully")
+        app.state.provider = CachedMarketDataProvider(Config)
+        logger.info("CachedMarketDataProvider initialized successfully")
     except Exception as e:
         logger.error(f"Failed to initialize MarketDataProvider: {e}")
         raise

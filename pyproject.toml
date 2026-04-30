@@ -3,16 +3,19 @@ requires = ["setuptools>=65.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "bobis-quote-MT5-marketdata-bridge"
+name = "bobis-quote-mt5-marketdata-bridge"
 version = "1.0.0"
 description = "Production-grade market data API for MetaTrader 5"
 readme = "README.md"
 requires-python = ">=3.10"
-license = {text = "MIT"}
+license = { text = "MIT" }
+
 authors = [
-    {name = "Editor's Quote", email = "amdevfred@gmail.com"},
+    { name = "Editor's Quote", email = "amdevfred@gmail.com" }
 ]
-keywords = ["MT5", "MetaTrader5", "trading", "market-data", "FOREX", "API"]
+
+keywords = ["MT5", "MetaTrader5", "trading", "market-data", "forex", "API"]
+
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Financial and Insurance Industry",
@@ -37,20 +40,29 @@ dependencies = [
 dev = [
     "pytest>=7.4.0",
     "pytest-asyncio>=0.21.0",
+    "pytest-cov>=4.1.0",
     "black>=23.0.0",
     "isort>=5.12.0",
-    "flake8>=6.0.0",
     "mypy>=1.5.0",
-    "pytest-cov>=4.1.0",
+    "flake8>=6.0.0",
 ]
+
+# ✅ CLI ENTRY POINT (THIS FIXES YOUR TERMINAL ISSUE)
+[project.scripts]
+market-data = "run:main"
 
 [project.urls]
 Documentation = "https://github.com/amfredfred/bobis-quote-MT5-marketdata-bridge"
-Repository = "https://github.com/amfredfred/bobis-quote-MT5-marketdata-bridge"
-Issues = "https://github.com/amfredfred/bobis-quote-MT5-marketdata-bridge/issues"
+Repository = "https://github.com/amfredfred/bobis-quote-mt5-marketdata-bridge"
+Issues = "https://github.com/amfredfred/bobis-quote-mt5-marketdata-bridge/issues"
 
-[tool.setuptools]
-packages = ["src", "src.core", "src.api"]
+# ✅ FIXED PACKAGE DISCOVERY (IMPORTANT)
+[tool.setuptools.packages.find]
+where = ["src"]
+
+# ─────────────────────────────────────────────
+# Formatting / Linting
+# ─────────────────────────────────────────────
 
 [tool.black]
 line-length = 100
@@ -65,7 +77,7 @@ python_version = "3.10"
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = false
-disallow_incomplete_defs = false
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

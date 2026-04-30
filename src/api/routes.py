@@ -6,7 +6,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Query, Request
 
-from src.core import (
+from core import (
     CandleRequest,
     FetchSuccess,
     MarketDataProvider,

@@ -1,0 +1,539 @@
+"""
+performance.py — TTL cache + SQLite persistence layer for MT5 candle data.
+
+Flow: Request → TTL Cache → SQLite → MT5 → Store → Response
+
+Rules:
+- Always refresh latest candle from MT5
+- SQLite is NOT source of truth (MT5 wins on conflicts)
+- No cron, no background sync
+"""
+
+import logging
+import sqlite3
+import threading
+import time
+from datetime import datetime, timezone
+from typing import Optional
+
+import concurrent.futures
+
+from .configs import Config
+from .constants import _TIMEFRAME_SECONDS
+from .market_data import MarketDataProvider
+from .models import (
+    Candle,
+    CandleRequest,
+    CandleResult,
+    FetchFailure,
+    FetchResult,
+    FetchSuccess,
+    MarketDataError,
+)
+
+logger = logging.getLogger(__name__)
+
+_TTL_SECONDS = 1.5
+
+
+# =============================================================================
+# TTL CACHE
+# =============================================================================
+
+
+class _TTLEntry:
+    __slots__ = ("value", "expires_at")
+
+    def __init__(self, value: list[Candle], ttl: float) -> None:
+        self.value = value
+        self.expires_at = time.monotonic() + ttl
+
+
+class TTLCache:
+    def __init__(self, ttl: float = _TTL_SECONDS) -> None:
+        self._ttl = ttl
+        self._store: dict[str, _TTLEntry] = {}
+        self._lock = threading.Lock()
+
+    def get(self, key: str) -> Optional[list[Candle]]:
+        with self._lock:
+            entry = self._store.get(key)
+            if entry is None:
+                return None
+            if time.monotonic() > entry.expires_at:
+                del self._store[key]
+                return None
+            return entry.value
+
+    def set(self, key: str, value: list[Candle]) -> None:
+        with self._lock:
+            self._store[key] = _TTLEntry(value, self._ttl)
+
+    def invalidate(self, key: str) -> None:
+        with self._lock:
+            self._store.pop(key, None)
+
+    @staticmethod
+    def make_key(
+        symbol: str,
+        timeframe: str,
+        limit: Optional[int],
+        from_date: Optional[str],
+        to_date: Optional[str],
+    ) -> str:
+        if from_date:
+            return f"{symbol}:{timeframe}:range:{from_date}:{to_date or ''}"
+        return f"{symbol}:{timeframe}:{limit}"
+
+
+# =============================================================================
+# SQLITE STORE
+# =============================================================================
+
+
+class CandleStore:
+    _DDL = """
+    CREATE TABLE IF NOT EXISTS candles (
+        symbol        TEXT,
+        timeframe     TEXT,
+        timestamp     INTEGER,
+        open          REAL,
+        high          REAL,
+        low           REAL,
+        close         REAL,
+        volume        REAL,
+        is_tick_volume INTEGER,
+        PRIMARY KEY (symbol, timeframe, timestamp)
+    ) WITHOUT ROWID;
+
+    CREATE INDEX IF NOT EXISTS idx_candles_lookup
+        ON candles (symbol, timeframe, timestamp);
+    """
+
+    def __init__(self, db_path: str = "candles.db") -> None:
+        self._db_path = db_path
+        self._write_lock = threading.Lock()
+        self._local = threading.local()
+        self._init_db()
+
+    def _conn(self) -> sqlite3.Connection:
+        if not getattr(self._local, "conn", None):
+            conn = sqlite3.connect(self._db_path, check_same_thread=False)
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA synchronous=NORMAL")
+            conn.execute("PRAGMA cache_size=-32000")  # 32 MB
+            self._local.conn = conn
+        return self._local.conn
+
+    def _init_db(self) -> None:
+        conn = self._conn()
+        conn.executescript(self._DDL)
+        conn.commit()
+        logger.info("CandleStore initialized: %s", self._db_path)
+
+    # ------------------------------------------------------------------
+    # Reads  (no lock needed — WAL mode handles concurrent readers)
+    # ------------------------------------------------------------------
+
+    def query_limit(self, symbol: str, timeframe: str, limit: int) -> list[Candle]:
+        rows = (
+            self._conn()
+            .execute(
+                """
+            SELECT timestamp, open, high, low, close, volume, is_tick_volume
+            FROM candles
+            WHERE symbol = ? AND timeframe = ?
+            ORDER BY timestamp DESC
+            LIMIT ?
+            """,
+                (symbol, timeframe, limit),
+            )
+            .fetchall()
+        )
+        return [self._row_to_candle(r) for r in reversed(rows)]
+
+    def query_range(self, symbol: str, timeframe: str, from_ts: int, to_ts: int) -> list[Candle]:
+        rows = (
+            self._conn()
+            .execute(
+                """
+            SELECT timestamp, open, high, low, close, volume, is_tick_volume
+            FROM candles
+            WHERE symbol = ? AND timeframe = ? AND timestamp >= ? AND timestamp <= ?
+            ORDER BY timestamp ASC
+            """,
+                (symbol, timeframe, from_ts, to_ts),
+            )
+            .fetchall()
+        )
+        return [self._row_to_candle(r) for r in rows]
+
+    def count(self, symbol: str, timeframe: str) -> int:
+        row = (
+            self._conn()
+            .execute(
+                "SELECT COUNT(*) FROM candles WHERE symbol = ? AND timeframe = ?",
+                (symbol, timeframe),
+            )
+            .fetchone()
+        )
+        return row[0] if row else 0
+
+    def newest_timestamp(self, symbol: str, timeframe: str) -> Optional[int]:
+        row = (
+            self._conn()
+            .execute(
+                "SELECT MAX(timestamp) FROM candles WHERE symbol = ? AND timeframe = ?",
+                (symbol, timeframe),
+            )
+            .fetchone()
+        )
+        return row[0] if row and row[0] is not None else None
+
+    def oldest_timestamp(self, symbol: str, timeframe: str) -> Optional[int]:
+        row = (
+            self._conn()
+            .execute(
+                "SELECT MIN(timestamp) FROM candles WHERE symbol = ? AND timeframe = ?",
+                (symbol, timeframe),
+            )
+            .fetchone()
+        )
+        return row[0] if row and row[0] is not None else None
+
+    # ------------------------------------------------------------------
+    # Writes
+    # ------------------------------------------------------------------
+
+    def upsert(self, symbol: str, timeframe: str, candles: list[Candle]) -> None:
+        if not candles:
+            return
+        with self._write_lock:
+            conn = self._conn()
+            conn.executemany(
+                """
+                INSERT OR REPLACE INTO candles
+                    (symbol, timeframe, timestamp, open, high, low, close, volume, is_tick_volume)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    (
+                        symbol,
+                        timeframe,
+                        c.timestamp,
+                        c.open,
+                        c.high,
+                        c.low,
+                        c.close,
+                        c.volume,
+                        int(c.is_tick_volume),
+                    )
+                    for c in candles
+                ],
+            )
+            conn.commit()
+
+    # ------------------------------------------------------------------
+    # Internal
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _row_to_candle(row: tuple) -> Candle:
+        return Candle(
+            timestamp=row[0],
+            open=row[1],
+            high=row[2],
+            low=row[3],
+            close=row[4],
+            volume=row[5],
+            is_tick_volume=bool(row[6]),
+        )
+
+
+# =============================================================================
+# MERGE HELPERS
+# =============================================================================
+
+
+def _merge(base: list[Candle], override: list[Candle]) -> list[Candle]:
+    """Merge two candle lists. override wins on duplicate timestamps."""
+    merged: dict[int, Candle] = {c.timestamp: c for c in base}
+    merged.update({c.timestamp: c for c in override})
+    return sorted(merged.values(), key=lambda c: c.timestamp)
+
+
+# =============================================================================
+# CACHED MARKET DATA PROVIDER
+# =============================================================================
+
+
+class CachedMarketDataProvider:
+    """
+    Drop-in replacement for MarketDataProvider with TTL cache + SQLite persistence.
+
+    get_candles() and get_multiple() have the same signature and semantics.
+    """
+
+    def __init__(self, config: Config, db_path: str = "candles.db") -> None:
+        self._provider = MarketDataProvider(config)
+        self._store = CandleStore(db_path)
+        self._cache = TTLCache(ttl=_TTL_SECONDS)
+        self._pool = concurrent.futures.ThreadPoolExecutor(
+            max_workers=8, thread_name_prefix="cached-md"
+        )
+
+    # ------------------------------------------------------------------
+    # Public API  (same as MarketDataProvider)
+    # ------------------------------------------------------------------
+
+    def get_candles(
+        self,
+        symbol: str,
+        timeframe: str,
+        limit: Optional[int] = None,
+        from_date: Optional[str] = None,
+        to_date: Optional[str] = None,
+        allow_gaps: bool = False,
+        check_staleness: bool = True,
+        analysis_ts: Optional[datetime] = None,
+    ) -> list[Candle]:
+        tf = timeframe.lower()
+        cache_key = TTLCache.make_key(symbol, tf, limit, from_date, to_date)
+
+        # 1. TTL cache
+        cached = self._cache.get(cache_key)
+        if cached is not None:
+            logger.debug("TTL cache hit: %s", cache_key)
+            return cached
+
+        if from_date:
+            candles = self._fetch_range(
+                symbol,
+                tf,
+                from_date,
+                to_date,
+                allow_gaps,
+                check_staleness,
+                analysis_ts,
+            )
+        else:
+            candles = self._fetch_limit(
+                symbol,
+                tf,
+                limit,
+                allow_gaps,
+                check_staleness,
+                analysis_ts,
+            )
+
+        self._cache.set(cache_key, candles)
+        return candles
+
+    def get_multiple(self, request: CandleRequest) -> CandleResult:
+        from .constants import _TIMEFRAME_SECONDS
+        from .market_data import _last_closed_bar_utc
+
+        anchor_tf = max(request.timeframes, key=lambda t: _TIMEFRAME_SECONDS[t])
+        analysis_ts = _last_closed_bar_utc(anchor_tf)
+
+        self._provider._worker.ensure_connected()
+
+        result: CandleResult = {}
+
+        def _job(s: str, tf: str) -> FetchResult:
+            try:
+                candles = self.get_candles(
+                    symbol=s,
+                    timeframe=tf,
+                    limit=request.limit,
+                    from_date=request.from_date,
+                    to_date=request.to_date,
+                    allow_gaps=request.allow_gaps,
+                    check_staleness=request.check_staleness,
+                    analysis_ts=analysis_ts,
+                )
+                return FetchSuccess(symbol=s, timeframe=tf, candles=candles)
+            except MarketDataError as exc:
+                logger.error("Fetch failed %s/%s [%s]: %s", s, tf, type(exc).__name__, exc)
+                return FetchFailure(
+                    symbol=s, timeframe=tf, error=str(exc), error_type=type(exc).__name__
+                )
+
+        futures = {
+            self._pool.submit(_job, s, tf): (s, tf)
+            for s in request.symbols
+            for tf in request.timeframes
+        }
+
+        for future in concurrent.futures.as_completed(futures):
+            fetch_result = future.result()
+            result.setdefault(fetch_result.symbol, {})[fetch_result.timeframe] = fetch_result
+
+        return result
+
+    def shutdown(self) -> None:
+        self._pool.shutdown(wait=True)
+        self._provider.shutdown()
+
+    # ------------------------------------------------------------------
+    # Internal: limit-based fetch
+    # ------------------------------------------------------------------
+
+    def _fetch_limit(
+        self,
+        symbol: str,
+        timeframe: str,
+        limit: int,
+        allow_gaps: bool,
+        check_staleness: bool,
+        analysis_ts: Optional[datetime],
+    ) -> list[Candle]:
+        db_count = self._store.count(symbol, timeframe)
+
+        if db_count >= limit:
+            # SQLite has enough history — only refresh the latest candle from MT5.
+            logger.debug(
+                "SQLite hit (partial refresh): %s/%s count=%d limit=%d",
+                symbol,
+                timeframe,
+                db_count,
+                limit,
+            )
+            fresh = self._mt5_fetch(
+                symbol, timeframe, 2, None, None, allow_gaps, check_staleness, analysis_ts
+            )
+
+            db_candles = self._store.query_limit(symbol, timeframe, limit)
+            merged = _merge(db_candles, fresh)[-limit:]
+
+            self._store.upsert(symbol, timeframe, fresh)
+            logger.debug("Stored %d fresh candles for %s/%s", len(fresh), symbol, timeframe)
+            return merged
+
+        # SQLite doesn't have enough — full MT5 fetch, fill the store.
+        logger.debug(
+            "SQLite miss (full fetch): %s/%s count=%d limit=%d", symbol, timeframe, db_count, limit
+        )
+        mt5_candles = self._mt5_fetch(
+            symbol, timeframe, limit, None, None, allow_gaps, check_staleness, analysis_ts
+        )
+
+        db_candles = self._store.query_limit(symbol, timeframe, limit * 2)  # grab extra for merge
+        merged = _merge(db_candles, mt5_candles)
+
+        self._store.upsert(symbol, timeframe, merged)
+        return merged[-limit:]
+
+    # ------------------------------------------------------------------
+    # Internal: date-range fetch
+    # ------------------------------------------------------------------
+
+    def _fetch_range(
+        self,
+        symbol: str,
+        timeframe: str,
+        from_date: str,
+        to_date: Optional[str],
+        allow_gaps: bool,
+        check_staleness: bool,
+        analysis_ts: Optional[datetime],
+    ) -> list[Candle]:
+        from .market_data import _parse_utc_date, _last_closed_bar_utc
+
+        from_dt = _parse_utc_date(from_date)
+        to_dt = (
+            _parse_utc_date(to_date)
+            if to_date
+            else (analysis_ts or _last_closed_bar_utc(timeframe))
+        )
+
+        from_ts = int(from_dt.timestamp()) * 1000
+        to_ts = int(to_dt.timestamp()) * 1000
+
+        db_candles = self._store.query_range(symbol, timeframe, from_ts, to_ts)
+
+        if db_candles:
+            db_oldest = db_candles[0].timestamp
+            db_newest = db_candles[-1].timestamp
+            tf_ms = _TIMEFRAME_SECONDS[timeframe] * 1000
+
+            # Always refresh the tail (latest bar rule)
+            fresh_tail = self._mt5_fetch(
+                symbol,
+                timeframe,
+                2,
+                None,
+                None,
+                allow_gaps,
+                False,
+                analysis_ts,
+            )
+
+            # Check if there's a gap at the start we need to fill
+            needs_head = db_oldest > (from_ts + tf_ms)
+
+            if needs_head:
+                # Fetch the missing head portion from MT5 via date range
+                logger.debug("Filling head gap for %s/%s from %s", symbol, timeframe, from_date)
+                head_to = datetime.fromtimestamp(db_oldest / 1000, tz=timezone.utc).strftime(
+                    "%Y-%m-%dT%H:%M:%SZ"
+                )
+                head_candles = self._mt5_fetch(
+                    symbol,
+                    timeframe,
+                    None,
+                    from_date,
+                    head_to,
+                    allow_gaps,
+                    False,
+                    analysis_ts,
+                )
+                merged = _merge(db_candles, _merge(head_candles, fresh_tail))
+            else:
+                merged = _merge(db_candles, fresh_tail)
+
+            # Filter to requested range
+            merged = [c for c in merged if from_ts <= c.timestamp <= to_ts]
+            self._store.upsert(symbol, timeframe, merged)
+            return merged
+
+        # Nothing in SQLite — full MT5 fetch
+        logger.debug("SQLite range miss: %s/%s [%s → %s]", symbol, timeframe, from_date, to_date)
+        mt5_candles = self._mt5_fetch(
+            symbol,
+            timeframe,
+            None,
+            from_date,
+            to_date,
+            allow_gaps,
+            check_staleness,
+            analysis_ts,
+        )
+        self._store.upsert(symbol, timeframe, mt5_candles)
+        return mt5_candles
+
+    # ------------------------------------------------------------------
+    # Internal: delegate to raw MT5 provider
+    # ------------------------------------------------------------------
+
+    def _mt5_fetch(
+        self,
+        symbol: str,
+        timeframe: str,
+        limit: Optional[int],
+        from_date: Optional[str],
+        to_date: Optional[str],
+        allow_gaps: bool,
+        check_staleness: bool,
+        analysis_ts: Optional[datetime],
+    ) -> list[Candle]:
+        return self._provider.get_candles(
+            symbol=symbol,
+            timeframe=timeframe,
+            limit=limit,
+            from_date=from_date,
+            to_date=to_date,
+            allow_gaps=allow_gaps,
+            check_staleness=check_staleness,
+            analysis_ts=analysis_ts,
+        )
