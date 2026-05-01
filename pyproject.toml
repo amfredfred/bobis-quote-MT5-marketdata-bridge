@@ -49,7 +49,7 @@ dev = [
 
 # ✅ CLI ENTRY POINT (THIS FIXES YOUR TERMINAL ISSUE)
 [project.scripts]
-market-data = "run:main"
+market-data = "entry:main"
 
 [project.urls]
 Documentation = "https://github.com/amfredfred/bobis-quote-MT5-marketdata-bridge"
