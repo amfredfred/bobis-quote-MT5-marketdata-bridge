@@ -1,10 +1,10 @@
-# install.ps1 — Run as Administrator
-# powershell -ExecutionPolicy Bypass -File install.ps1
+# install_windows_service.ps1 — Run as Administrator
+# powershell -ExecutionPolicy Bypass -File install_windows_service.ps1
 
 $ServiceName = "BobisQuoteCandleService"
 $EngineDir   = Split-Path -Parent $MyInvocation.MyCommand.Path
 $PythonExe   = Join-Path $EngineDir ".venv\Scripts\python.exe"
-$MainScript  = Join-Path $EngineDir "main.py"
+$MainScript = Join-Path $EngineDir ".venv\Scripts\market-data.exe"
 $NssmExe     = Join-Path $EngineDir ".\nssm\nssm-2.24\win64\nssm.exe"
 $LogDir      = Join-Path $EngineDir "logs"
 
