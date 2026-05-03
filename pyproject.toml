@@ -3,7 +3,7 @@ requires = ["setuptools>=65.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "bobis-quote-mt5-marketdata-bridge"
+name = "market-data"
 version = "1.0.0"
 description = "Production-grade market data API for MetaTrader 5"
 readme = "README.md"
@@ -49,7 +49,7 @@ dev = [
 
 # ✅ CLI ENTRY POINT (THIS FIXES YOUR TERMINAL ISSUE)
 [project.scripts]
-market-data = "entry:main"
+market-data = "market_data.entry:main"
 
 [project.urls]
 Documentation = "https://github.com/amfredfred/bobis-quote-MT5-marketdata-bridge"

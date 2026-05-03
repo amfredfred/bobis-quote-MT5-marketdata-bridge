@@ -95,7 +95,8 @@ class MT5Worker:
 
     _SHUTDOWN = object()  # sentinel
 
-    def __init__(self) -> None:
+    def __init__(self, config:Config) -> None:
+        self._config = config
         self._queue: Queue = Queue()
         self._ready = threading.Event()
         self._init_error: Optional[Exception] = None
@@ -113,7 +114,12 @@ class MT5Worker:
     def _run(self) -> None:
         """Entire body executes on the dedicated MT5 thread."""
         try:
-            if not mt5.initialize():
+            if not mt5.initialize(
+                login=self._config.MT5_ACCOUNT_NUMBER,
+                password=self._config.MT5_ACCOUNT_PASSWORD,
+                server=self._config.MT5_ACCOUNT_SERVER,
+                path=self._config.PATH_MT5_EXEC,
+            ):
                 self._init_error = MT5ConnectionError(
                     f"mt5.initialize() failed: {mt5.last_error()}"
                 )
@@ -499,7 +505,7 @@ def _build(rates, symbol: str, timeframe: str, offset_s: float = 0.0) -> list[Ca
 
 class MarketDataProvider:
     def __init__(self, config: Config) -> None:
-        self._worker = MT5Worker()
+        self._worker = MT5Worker(config=config)
         self._offset_mgr = BrokerOffsetManager(config, self._worker)
         self._resolver = SymbolResolver(self._worker)
         self._resolver.preload()
