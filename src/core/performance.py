@@ -33,7 +33,7 @@ from .models import (
 
 logger = logging.getLogger(__name__)
 
-_TTL_SECONDS = 1.5
+_TTL_SECONDS = 30.0   # was 1.5 s — align with the shortest meaningful bar cadence
 
 
 # =============================================================================
@@ -50,9 +50,17 @@ class _TTLEntry:
 
 
 class TTLCache:
+    """Thread-safe TTL cache with per-key in-flight deduplication.
+
+    When multiple threads request the same key simultaneously and the cache
+    is cold, only the first thread fetches; the rest wait and share the result.
+    This prevents duplicate MT5 round-trips for the same (symbol, timeframe).
+    """
+
     def __init__(self, ttl: float = _TTL_SECONDS) -> None:
         self._ttl = ttl
         self._store: dict[str, _TTLEntry] = {}
+        self._inflight: dict[str, threading.Event] = {}
         self._lock = threading.Lock()
 
     def get(self, key: str) -> Optional[list[Candle]]:
@@ -68,10 +76,34 @@ class TTLCache:
     def set(self, key: str, value: list[Candle]) -> None:
         with self._lock:
             self._store[key] = _TTLEntry(value, self._ttl)
+            # Wake any threads that were waiting on this key.
+            event = self._inflight.pop(key, None)
+        if event:
+            event.set()
 
     def invalidate(self, key: str) -> None:
         with self._lock:
             self._store.pop(key, None)
+
+    def acquire_inflight(self, key: str) -> Optional[threading.Event]:
+        """Register as the fetching thread for *key*.
+
+        Returns None  → caller is the designated fetcher; it must call set().
+        Returns Event → another thread is already fetching; wait on the event,
+                        then call get() again to retrieve the shared result.
+        """
+        with self._lock:
+            if key in self._inflight:
+                return self._inflight[key]      # already in-flight — wait
+            self._inflight[key] = threading.Event()
+            return None                         # we are the fetcher
+
+    def release_inflight(self, key: str) -> None:
+        """Called by the fetching thread on error (set() already handles success)."""
+        with self._lock:
+            event = self._inflight.pop(key, None)
+        if event:
+            event.set()
 
     @staticmethod
     def make_key(
@@ -121,9 +153,16 @@ class CandleStore:
             conn = sqlite3.connect(self._db_path, check_same_thread=False)
             conn.execute("PRAGMA journal_mode=WAL")
             conn.execute("PRAGMA synchronous=NORMAL")
-            conn.execute("PRAGMA cache_size=-32000")  # 32 MB
+            conn.execute("PRAGMA cache_size=-4000")   # 4 MB — was 32 MB per thread
             self._local.conn = conn
         return self._local.conn
+
+    def close(self) -> None:
+        """Close the connection on the calling thread (call from pool shutdown hook)."""
+        conn = getattr(self._local, "conn", None)
+        if conn:
+            conn.close()
+            self._local.conn = None
 
     def _init_db(self) -> None:
         conn = self._conn()
@@ -274,13 +313,17 @@ class CachedMarketDataProvider:
     get_candles() and get_multiple() have the same signature and semantics.
     """
 
+    _POOL_WORKERS = 8
+
     def __init__(self, config: Config, db_path: str = "candles.db") -> None:
-        self._provider = MarketDataProvider(config)
+        # One shared pool — injected into MarketDataProvider so there are no
+        # orphaned thread pools sitting idle (Fix 1).
+        self._pool = concurrent.futures.ThreadPoolExecutor(
+            max_workers=self._POOL_WORKERS, thread_name_prefix="cached-md"
+        )
+        self._provider = MarketDataProvider(config, pool=self._pool)
         self._store = CandleStore(db_path)
         self._cache = TTLCache(ttl=_TTL_SECONDS)
-        self._pool = concurrent.futures.ThreadPoolExecutor(
-            max_workers=8, thread_name_prefix="cached-md"
-        )
 
     # ------------------------------------------------------------------
     # Public API  (same as MarketDataProvider)
@@ -300,34 +343,38 @@ class CachedMarketDataProvider:
         tf = timeframe.lower()
         cache_key = TTLCache.make_key(symbol, tf, limit, from_date, to_date)
 
-        # 1. TTL cache
+        # 1. TTL cache — fast path, no locking needed.
         cached = self._cache.get(cache_key)
         if cached is not None:
             logger.debug("TTL cache hit: %s", cache_key)
             return cached
 
-        if from_date:
-            candles = self._fetch_range(
-                symbol,
-                tf,
-                from_date,
-                to_date,
-                allow_gaps,
-                check_staleness,
-                analysis_ts,
-            )
-        else:
-            candles = self._fetch_limit(
-                symbol,
-                tf,
-                limit,
-                allow_gaps,
-                check_staleness,
-                analysis_ts,
-            )
+        # 2. In-flight dedup — if another thread is already fetching this key,
+        #    wait for it and return its result rather than firing a second MT5 call.
+        wait_event = self._cache.acquire_inflight(cache_key)
+        if wait_event is not None:
+            logger.debug("In-flight wait: %s", cache_key)
+            wait_event.wait(timeout=30.0)
+            result = self._cache.get(cache_key)
+            if result is not None:
+                return result
+            # Fetching thread errored — fall through and try ourselves.
 
-        self._cache.set(cache_key, candles)
-        return candles
+        # 3. We are the designated fetcher for this key.
+        try:
+            if from_date:
+                candles = self._fetch_range(
+                    symbol, tf, from_date, to_date, allow_gaps, check_staleness, analysis_ts
+                )
+            else:
+                candles = self._fetch_limit(
+                    symbol, tf, limit, allow_gaps, check_staleness, analysis_ts
+                )
+            self._cache.set(cache_key, candles)   # also wakes any waiters
+            return candles
+        except Exception:
+            self._cache.release_inflight(cache_key)  # wake waiters so they don't hang
+            raise
 
     def get_multiple(self, request: CandleRequest) -> CandleResult:
         from .constants import _TIMEFRAME_SECONDS
@@ -372,8 +419,17 @@ class CachedMarketDataProvider:
         return result
 
     def shutdown(self) -> None:
+        # Close each thread's SQLite connection from within the thread itself.
+        # Submit one close() job per worker so every thread runs the cleanup
+        # before the pool joins them.
+        close_futures = [
+            self._pool.submit(self._store.close)
+            for _ in range(self._POOL_WORKERS)
+        ]
+        concurrent.futures.wait(close_futures)
+
         self._pool.shutdown(wait=True)
-        self._provider.shutdown()
+        self._provider.shutdown()   # shuts down MT5Worker; won't double-close the pool
 
     # ------------------------------------------------------------------
     # Internal: limit-based fetch
@@ -418,7 +474,8 @@ class CachedMarketDataProvider:
             symbol, timeframe, limit, None, None, allow_gaps, check_staleness, analysis_ts
         )
 
-        db_candles = self._store.query_limit(symbol, timeframe, limit * 2)  # grab extra for merge
+        # Merge only what SQLite already has (no double-fetch).
+        db_candles = self._store.query_limit(symbol, timeframe, limit)
         merged = _merge(db_candles, mt5_candles)
 
         self._store.upsert(symbol, timeframe, merged)

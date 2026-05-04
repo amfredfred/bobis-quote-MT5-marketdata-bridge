@@ -95,7 +95,7 @@ class MT5Worker:
 
     _SHUTDOWN = object()  # sentinel
 
-    def __init__(self, config:Config) -> None:
+    def __init__(self, config: Config) -> None:
         self._config = config
         self._queue: Queue = Queue()
         self._ready = threading.Event()
@@ -114,12 +114,41 @@ class MT5Worker:
     def _run(self) -> None:
         """Entire body executes on the dedicated MT5 thread."""
         try:
-            if not mt5.initialize(
-                login=self._config.MT5_ACCOUNT_NUMBER,
-                password=self._config.MT5_ACCOUNT_PASSWORD,
-                server=self._config.MT5_ACCOUNT_SERVER,
-                path=self._config.PATH_MT5_EXEC,
-            ):
+            # Step 1 — attach to the already-running graphical terminal for
+            # this broker (path= selects which installation, no credentials
+            # so it won't spawn a new hidden instance).
+            if mt5.initialize(path=self._config.PATH_MT5_EXEC):
+                info = mt5.account_info()
+                if info and info.login == self._config.MT5_ACCOUNT_NUMBER:
+                    logger.info("MT5: attached to running terminal (login=%d)", info.login)
+                else:
+                    # Terminal is open but logged into a different account —
+                    # re-init with credentials to switch.
+                    logger.info("MT5: terminal open but wrong account, re-logging in...")
+                    mt5.shutdown()
+                    if not mt5.initialize(
+                        login=self._config.MT5_ACCOUNT_NUMBER,
+                        password=self._config.MT5_ACCOUNT_PASSWORD,
+                        server=self._config.MT5_ACCOUNT_SERVER,
+                        path=self._config.PATH_MT5_EXEC,
+                    ):
+                        self._init_error = MT5ConnectionError(
+                            f"mt5.initialize() login failed: {mt5.last_error()}"
+                        )
+                        return
+            else:
+                # Step 2 — terminal not running yet, launch it with credentials.
+                logger.info("MT5: terminal not running, launching with credentials...")
+                if not mt5.initialize(
+                    login=self._config.MT5_ACCOUNT_NUMBER,
+                    password=self._config.MT5_ACCOUNT_PASSWORD,
+                    server=self._config.MT5_ACCOUNT_SERVER,
+                    path=self._config.PATH_MT5_EXEC,
+                ):
+                    self._init_error = MT5ConnectionError(
+                        f"mt5.initialize() failed: {mt5.last_error()}"
+                    )
+                    return
                 self._init_error = MT5ConnectionError(
                     f"mt5.initialize() failed: {mt5.last_error()}"
                 )
@@ -287,19 +316,19 @@ class SymbolResolver:
         self._lock = threading.RLock()
 
     def preload(self) -> None:
+        """Load symbol names only — do NOT activate every symbol eagerly.
+        Activation (symbol_select) is deferred to resolve() so MT5 only
+        keeps the symbols your callers actually use in its working set."""
+
         def _load() -> list[str]:
             symbols = mt5.symbols_get()
-            if not symbols:
-                return []
-            for s in symbols:
-                mt5.symbol_select(s.name, True)
-            return [s.name for s in symbols]
+            return [s.name for s in symbols] if symbols else []
 
         names = self._worker.run_sync(_load)
         with self._lock:
             self._all_symbols = names
             self._cache.clear()
-        logger.info("SymbolResolver: %d symbols loaded", len(names))
+        logger.info("SymbolResolver: %d symbol names indexed (lazy activation)", len(names))
 
     def resolve(self, symbol: str) -> str:
         clean = symbol.replace("/", "").replace("_", "").upper()
@@ -310,19 +339,21 @@ class SymbolResolver:
 
             exact = [n for n in self._all_symbols if n.upper() == clean]
             if exact:
-                self._cache[clean] = exact[0]
-                return exact[0]
+                resolved = exact[0]
+            else:
+                prefix = [n for n in self._all_symbols if n.upper().startswith(clean)]
+                if len(prefix) == 1:
+                    logger.info("Symbol %r resolved via prefix → %r", symbol, prefix[0])
+                    resolved = prefix[0]
+                elif len(prefix) > 1:
+                    raise SymbolResolutionError(symbol, prefix)
+                else:
+                    raise SymbolNotFoundError(symbol)
 
-            prefix = [n for n in self._all_symbols if n.upper().startswith(clean)]
-            if len(prefix) == 1:
-                logger.info("Symbol %r resolved via prefix → %r", symbol, prefix[0])
-                self._cache[clean] = prefix[0]
-                return prefix[0]
-
-            if len(prefix) > 1:
-                raise SymbolResolutionError(symbol, prefix)
-
-            raise SymbolNotFoundError(symbol)
+            # Activate lazily — only symbols callers actually request.
+            self._worker.run_sync(lambda: mt5.symbol_select(resolved, True))
+            self._cache[clean] = resolved
+            return resolved
 
 
 # =============================================================================
@@ -504,15 +535,27 @@ def _build(rates, symbol: str, timeframe: str, offset_s: float = 0.0) -> list[Ca
 
 
 class MarketDataProvider:
-    def __init__(self, config: Config) -> None:
+    def __init__(
+        self,
+        config: Config,
+        pool: Optional[concurrent.futures.ThreadPoolExecutor] = None,
+    ) -> None:
         self._worker = MT5Worker(config=config)
         self._offset_mgr = BrokerOffsetManager(config, self._worker)
         self._resolver = SymbolResolver(self._worker)
+        # If a pool is injected (e.g. by CachedMarketDataProvider) reuse it.
+        # Only own the pool — and register shutdown — when we created it.
+        if pool is not None:
+            self._pool = pool
+            self._owns_pool = False
+        else:
+            self._pool = concurrent.futures.ThreadPoolExecutor(
+                max_workers=8, thread_name_prefix="md-dispatch"
+            )
+            self._owns_pool = True
+            atexit.register(self._pool.shutdown, wait=True)
+
         self._resolver.preload()
-        self._pool = concurrent.futures.ThreadPoolExecutor(
-            max_workers=8, thread_name_prefix="md-dispatch"
-        )
-        atexit.register(self._pool.shutdown, wait=True)
 
     def get_candles(
         self,
@@ -531,10 +574,9 @@ class MarketDataProvider:
 
         tf_mt5 = _TIMEFRAME_MAP[tf]
         offset_s = self._offset_mgr.get()
-        resolved = self._resolver.resolve(symbol)
+        resolved = self._resolver.resolve(symbol)  # activates symbol on first call
 
         self._worker.ensure_connected()
-        self._worker.run_sync(lambda: mt5.symbol_select(resolved, True))
 
         if from_date:
             f_utc = _parse_utc_date(from_date)
@@ -627,5 +669,6 @@ class MarketDataProvider:
         return result
 
     def shutdown(self) -> None:
-        self._pool.shutdown(wait=True)
+        if self._owns_pool:
+            self._pool.shutdown(wait=True)
         self._worker.shutdown()
