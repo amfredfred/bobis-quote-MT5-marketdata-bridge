@@ -97,7 +97,7 @@ class MT5Worker:
 
     def __init__(self, config: Config) -> None:
         self._config = config
-        self._queue: Queue = Queue()
+        self._queue: Queue = Queue(maxsize=256)  # backpressure: prevents unbounded RAM growth
         self._ready = threading.Event()
         self._init_error: Optional[Exception] = None
         self._thread = threading.Thread(target=self._run, daemon=True, name="mt5-worker")
@@ -149,10 +149,7 @@ class MT5Worker:
                         f"mt5.initialize() failed: {mt5.last_error()}"
                     )
                     return
-                self._init_error = MT5ConnectionError(
-                    f"mt5.initialize() failed: {mt5.last_error()}"
-                )
-                return
+                # Successfully launched terminal — fall through to queue loop.
         finally:
             self._ready.set()
 
@@ -311,12 +308,13 @@ def _last_closed_bar_utc(timeframe: str) -> datetime:
 class SymbolResolver:
     def __init__(self, worker: MT5Worker) -> None:
         self._worker = worker
-        self._all_symbols: list[str] = []
+        self._upper_to_name: dict[str, str] = {}   # exact upper → broker name
+        self._prefix_to_names: dict[str, list[str]] = {}  # prefix → matching names
         self._cache: dict[str, str] = {}
         self._lock = threading.RLock()
 
     def preload(self) -> None:
-        """Load symbol names only — do NOT activate every symbol eagerly.
+        """Load symbol names and build O(1) lookup indexes.
         Activation (symbol_select) is deferred to resolve() so MT5 only
         keeps the symbols your callers actually use in its working set."""
 
@@ -325,8 +323,18 @@ class SymbolResolver:
             return [s.name for s in symbols] if symbols else []
 
         names = self._worker.run_sync(_load)
+
+        upper_to_name: dict[str, str] = {}
+        prefix_to_names: dict[str, list[str]] = {}
+        for n in names:
+            upper = n.upper()
+            upper_to_name[upper] = n
+            for length in range(1, len(upper) + 1):
+                prefix_to_names.setdefault(upper[:length], []).append(n)
+
         with self._lock:
-            self._all_symbols = names
+            self._upper_to_name = upper_to_name
+            self._prefix_to_names = prefix_to_names
             self._cache.clear()
         logger.info("SymbolResolver: %d symbol names indexed (lazy activation)", len(names))
 
@@ -337,16 +345,15 @@ class SymbolResolver:
             if clean in self._cache:
                 return self._cache[clean]
 
-            exact = [n for n in self._all_symbols if n.upper() == clean]
-            if exact:
-                resolved = exact[0]
+            if clean in self._upper_to_name:
+                resolved = self._upper_to_name[clean]
             else:
-                prefix = [n for n in self._all_symbols if n.upper().startswith(clean)]
-                if len(prefix) == 1:
-                    logger.info("Symbol %r resolved via prefix → %r", symbol, prefix[0])
-                    resolved = prefix[0]
-                elif len(prefix) > 1:
-                    raise SymbolResolutionError(symbol, prefix)
+                prefix_matches = self._prefix_to_names.get(clean, [])
+                if len(prefix_matches) == 1:
+                    logger.info("Symbol %r resolved via prefix → %r", symbol, prefix_matches[0])
+                    resolved = prefix_matches[0]
+                elif len(prefix_matches) > 1:
+                    raise SymbolResolutionError(symbol, prefix_matches)
                 else:
                     raise SymbolNotFoundError(symbol)
 

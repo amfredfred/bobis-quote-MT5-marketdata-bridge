@@ -198,6 +198,17 @@ class CandleRequest(BaseModel):
             raise ValueError("Provide from_date OR limit, not both")
         if not self.from_date and not self.limit:
             raise ValueError("Provide from_date or limit")
+        # Guard against requests that would allocate hundreds of MB in one shot.
+        # e.g. 20 symbols × 5 TFs × 5000 candles = 500k Candle objects ≈ 100 MB.
+        _MAX_TOTAL_CANDLES = 50_000
+        if self.limit is not None:
+            total = len(self.symbols) * len(self.timeframes) * self.limit
+            if total > _MAX_TOTAL_CANDLES:
+                raise ValueError(
+                    f"Request would fetch ~{total:,} candles "
+                    f"({len(self.symbols)} symbols × {len(self.timeframes)} timeframes × {self.limit} limit). "
+                    f"Max is {_MAX_TOTAL_CANDLES:,}. Reduce symbols, timeframes, or limit."
+                )
         return self
 
 

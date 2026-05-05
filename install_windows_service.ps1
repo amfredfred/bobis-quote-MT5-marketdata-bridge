@@ -1,54 +1,84 @@
 # install_windows_service.ps1 — Run as Administrator
 # powershell -ExecutionPolicy Bypass -File install_windows_service.ps1
 
+$ErrorActionPreference = "Stop"
+
 $ServiceName = "BobisQuoteCandleService"
 $EngineDir   = Split-Path -Parent $MyInvocation.MyCommand.Path
-$PythonExe   = Join-Path $EngineDir ".venv\Scripts\python.exe"
-$MainScript = Join-Path $EngineDir ".venv\Scripts\market-data.exe"
-$NssmExe     = Join-Path $EngineDir ".\nssm\nssm-2.24\win64\nssm.exe"
+$AppExe      = Join-Path $EngineDir ".venv\Scripts\market-data.exe"
+$NssmExe     = Join-Path $EngineDir "nssm\nssm-2.24\win64\nssm.exe"
 $LogDir      = Join-Path $EngineDir "logs"
 
 # ── Pre-flight ────────────────────────────────────────────────────────────────
-if (-not (Test-Path $PythonExe)) { Write-Error "Venv not found: $PythonExe"; exit 1 }
-if (-not (Test-Path $NssmExe))   {
+if (-not (Test-Path $AppExe)) {
+    Write-Error "Executable not found: $AppExe"
+    exit 1
+}
+
+if (-not (Test-Path $NssmExe)) {
     Write-Host "Downloading NSSM..."
-    Invoke-WebRequest -Uri "https://nssm.cc/release/nssm-2.24.zip" -OutFile "$EngineDir\nssm.zip"
-    Expand-Archive "$EngineDir\nssm.zip" -DestinationPath "$EngineDir\nssm" -Force
-    Remove-Item "$EngineDir\nssm.zip"
+    $ZipPath = Join-Path $EngineDir "nssm.zip"
+    Invoke-WebRequest -Uri "https://nssm.cc/release/nssm-2.24.zip" -OutFile $ZipPath
+    Expand-Archive $ZipPath -DestinationPath (Join-Path $EngineDir "nssm") -Force
+    Remove-Item $ZipPath
     $NssmExe = Join-Path $EngineDir "nssm\nssm-2.24\win64\nssm.exe"
 }
 
-# ── Remove existing ───────────────────────────────────────────────────────────
-if ((& $NssmExe status $ServiceName 2>$null) -ne $null) {
-    Write-Host "Removing existing service..."
+New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
+
+# ── Remove existing cleanly ───────────────────────────────────────────────────
+$exists = sc.exe query $ServiceName 2>$null
+if ($LASTEXITCODE -eq 0) {
+    Write-Host "Stopping and removing existing service..."
     & $NssmExe stop   $ServiceName confirm 2>$null | Out-Null
+    Start-Sleep -Seconds 2
     & $NssmExe remove $ServiceName confirm 2>$null | Out-Null
     Start-Sleep -Seconds 2
 }
 
-# ── Install ───────────────────────────────────────────────────────────────────
-Write-Host "Installing $ServiceName..."
-New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
+# Kill any orphan processes from previous runs
+Get-Process | Where-Object {
+    $_.Path -like "*mt5-trading-api*" -or $_.ProcessName -like "market-data*"
+} | Stop-Process -Force -ErrorAction SilentlyContinue
 
-& $NssmExe install $ServiceName $PythonExe $MainScript
-& $NssmExe set $ServiceName AppDirectory  $EngineDir
-& $NssmExe set $ServiceName AppStdout     "$LogDir\service_stdout.log"
-& $NssmExe set $ServiceName AppStderr     "$LogDir\service_stderr.log"
+# ── Install ───────────────────────────────────────────────────────────────────
+Write-Host "Installing service..."
+
+& $NssmExe install $ServiceName $AppExe
+
+# Working directory
+& $NssmExe set $ServiceName AppDirectory $EngineDir
+
+# Logging
+& $NssmExe set $ServiceName AppStdout "$LogDir\stdout.log"
+& $NssmExe set $ServiceName AppStderr "$LogDir\stderr.log"
 & $NssmExe set $ServiceName AppRotateFiles 1
 & $NssmExe set $ServiceName AppRotateBytes 10485760
-& $NssmExe set $ServiceName Start         SERVICE_AUTO_START
-& $NssmExe set $ServiceName DisplayName   "BobisQuoteCandleService (MT5)"
-& $NssmExe set $ServiceName Description   "FastAPI MT5 candle data server on port 8000."
-& $NssmExe set $ServiceName AppThrottle 15000  # wait 15s before starting
 
-# Auto-restart on failure: 5s, 10s, 30s
-sc.exe failure $ServiceName reset= 60 actions= restart/5000/restart/10000/restart/30000 | Out-Null
+# Graceful shutdown (CRITICAL)
+& $NssmExe set $ServiceName AppStopMethodConsole 15000
+& $NssmExe set $ServiceName AppStopMethodWindow  15000
+& $NssmExe set $ServiceName AppStopMethodThreads 15000
+
+# Restart behavior (controlled)
+& $NssmExe set $ServiceName AppThrottle 5000        # prevent rapid restart loops
+& $NssmExe set $ServiceName AppExit Default Restart
+
+# Service metadata
+& $NssmExe set $ServiceName Start SERVICE_AUTO_START
+& $NssmExe set $ServiceName DisplayName "BobisQuoteCandleService (MT5)"
+& $NssmExe set $ServiceName Description "MT5 FastAPI candle data service"
+
+# Windows-level recovery (bounded)
+sc.exe failure $ServiceName reset= 300 actions= restart/5000/restart/15000/""/0 | Out-Null
 
 # ── Start ─────────────────────────────────────────────────────────────────────
 Write-Host "Starting service..."
 & $NssmExe start $ServiceName
-Start-Sleep -Seconds 5
+
+Start-Sleep -Seconds 3
 & $NssmExe status $ServiceName
 
 Write-Host ""
-Write-Host "Logs: Get-Content '$LogDir\service_stderr.log' -Tail 50 -Wait"
+Write-Host "Logs:"
+Write-Host "  Get-Content '$LogDir\stderr.log' -Tail 50 -Wait"

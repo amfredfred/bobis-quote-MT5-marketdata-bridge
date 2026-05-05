@@ -34,6 +34,7 @@ from .models import (
 logger = logging.getLogger(__name__)
 
 _TTL_SECONDS = 30.0   # was 1.5 s — align with the shortest meaningful bar cadence
+_CACHE_MAXSIZE = 512  # max live entries; LRU eviction kicks in beyond this
 
 
 # =============================================================================
@@ -55,13 +56,40 @@ class TTLCache:
     When multiple threads request the same key simultaneously and the cache
     is cold, only the first thread fetches; the rest wait and share the result.
     This prevents duplicate MT5 round-trips for the same (symbol, timeframe).
+
+    Size is bounded by maxsize: expired entries are swept on every set(); if
+    still over capacity, the soonest-to-expire entry is evicted (LRU-ish).
+    Without this bound the store grows without limit on services polling many
+    symbol/timeframe combinations.
     """
 
-    def __init__(self, ttl: float = _TTL_SECONDS) -> None:
+    def __init__(self, ttl: float = _TTL_SECONDS, maxsize: int = _CACHE_MAXSIZE) -> None:
         self._ttl = ttl
+        self._maxsize = maxsize
         self._store: dict[str, _TTLEntry] = {}
         self._inflight: dict[str, threading.Event] = {}
         self._lock = threading.Lock()
+
+    # ------------------------------------------------------------------
+    # Internal helpers  (must be called with self._lock held)
+    # ------------------------------------------------------------------
+
+    def _sweep_expired(self) -> None:
+        """Remove all expired entries. Call with lock held."""
+        now = time.monotonic()
+        expired = [k for k, v in self._store.items() if now > v.expires_at]
+        for k in expired:
+            del self._store[k]
+
+    def _evict_one(self) -> None:
+        """Evict the entry nearest to expiry to make room. Call with lock held."""
+        if self._store:
+            victim = min(self._store, key=lambda k: self._store[k].expires_at)
+            del self._store[victim]
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
 
     def get(self, key: str) -> Optional[list[Candle]]:
         with self._lock:
@@ -75,6 +103,11 @@ class TTLCache:
 
     def set(self, key: str, value: list[Candle]) -> None:
         with self._lock:
+            # Always sweep first — removes expired entries for free.
+            self._sweep_expired()
+            # Enforce hard size cap: evict until we have room for the new entry.
+            while len(self._store) >= self._maxsize and key not in self._store:
+                self._evict_one()
             self._store[key] = _TTLEntry(value, self._ttl)
             # Wake any threads that were waiting on this key.
             event = self._inflight.pop(key, None)
