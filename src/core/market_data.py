@@ -78,6 +78,12 @@ T = TypeVar("T")
 # FIX 1 — MT5 WORKER  (single dedicated OS thread)
 # =============================================================================
 
+PREFERRED_SUFFIX_ORDER = [
+    "",  # exact
+    "M",  # mini
+    "_X100M",
+    "_X10M",
+]
 
 class MT5Worker:
     """
@@ -337,6 +343,15 @@ class SymbolResolver:
             self._prefix_to_names = prefix_to_names
             self._cache.clear()
         logger.info("SymbolResolver: %d symbol names indexed (lazy activation)", len(names))
+        
+    def _rank_symbol(self, name: str) -> int:
+        upper = name.upper()
+
+        for idx, suffix in enumerate(PREFERRED_SUFFIX_ORDER):
+            if upper.endswith(suffix):
+                return idx
+
+        return 999
 
     def resolve(self, symbol: str) -> str:
         clean = symbol.replace("/", "").replace("_", "").upper()
@@ -353,7 +368,14 @@ class SymbolResolver:
                     logger.info("Symbol %r resolved via prefix → %r", symbol, prefix_matches[0])
                     resolved = prefix_matches[0]
                 elif len(prefix_matches) > 1:
-                    raise SymbolResolutionError(symbol, prefix_matches)
+                    resolved = sorted(prefix_matches, key=self._rank_symbol)[0]
+
+                    logger.warning(
+                        "Ambiguous symbol %r resolved automatically → %r candidates=%s",
+                        symbol,
+                        resolved,
+                        prefix_matches,
+                    )
                 else:
                     raise SymbolNotFoundError(symbol)
 
