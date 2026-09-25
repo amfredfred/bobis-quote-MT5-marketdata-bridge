@@ -22,7 +22,7 @@ async def health(request: Request):
     """Health check endpoint"""
     provider: MarketDataProvider = request.app.state.provider
     try:
-        provider._worker.ensure_connected()
+        provider.ensure_connected()
         return {"status": "healthy"}
     except Exception as e:
         return {"status": "unhealthy", "reason": str(e)}

@@ -586,6 +586,10 @@ class MarketDataProvider:
 
         self._resolver.preload()
 
+    def ensure_connected(self) -> None:
+        """Verify the MT5 terminal connection is alive (used by health checks)."""
+        self._worker.ensure_connected()
+
     def get_candles(
         self,
         symbol: str,

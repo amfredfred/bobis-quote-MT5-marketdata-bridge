@@ -362,6 +362,10 @@ class CachedMarketDataProvider:
     # Public API  (same as MarketDataProvider)
     # ------------------------------------------------------------------
 
+    def ensure_connected(self) -> None:
+        """Verify the underlying MT5 connection is alive (used by health checks)."""
+        self._provider.ensure_connected()
+
     def get_candles(
         self,
         symbol: str,
